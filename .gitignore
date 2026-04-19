@@ -1,0 +1,12 @@
+# These files are untracked by git
+
+.Rhistory
+.RData
+Figures
+OLD_seq_data
+R_Data
+Manuscript
+Notes
+AllenData
+
+.Rproj.user
