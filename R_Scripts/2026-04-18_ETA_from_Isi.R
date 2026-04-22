@@ -20,13 +20,17 @@ library(tidyverse)
 library(ecotraj)
 library(tibble)
 
-setwd("C://Users/haler/Documents/PhD-Bowman/Microscopy_time_series/")
+setwd("C://Users/haler/Documents/PhD-Bowman/Microscopy_time_series/R_Data")
 
 
 combo.full <- readRDS("2026-03-27_microscopy_o2bio_combo_full.rds")
 combo.sio.temp <- readRDS("2026-02-14_combo_sio_temp.rds") ## all heatwaves
 model.var.imp <- readRDS("2026-02-09_microscopy_model_var_imp.rds")
 predictors <- readRDS("2026-03-27_phyto_rf_predictors.rds")
+
+
+setwd("C://Users/haler/Documents/PhD-Bowman/Microscopy_time_series/")
+
 
 
 r_scripps <- combo.full[,which(colnames(combo.full) %in% c("Date", predictors))]
@@ -74,8 +78,8 @@ rownames(metadata_scripps) <- rownames(samples_df_scripps)
 #####Scripps
 samples_df_scripps$point<- "1"
 
-table(samples_df_scripps$year)
-samples_df_scripps %>% count(year)
+# table(samples_df_scripps$year)
+# samples_df_scripps %>% count(samplesyear)
 
 
 samples_scripps_all <- ggplot(samples_df_scripps, aes(x = day, y = point)) +
@@ -130,7 +134,7 @@ x_scripps$metadata
 trajectoryPCoA(x_scripps, traj.colors = rainbow(n = 14), lwd = 2,
                survey.labels = T)
 legend("topright", col= rainbow(n = 14), 
-       legend=c("2018","2019","2020","2021","2022", "2023", "2024"), bty="n", lty=1, lwd = 2)
+       legend=as.character(c(2011:2020, 2022:2024)), bty="n", lty=1, lwd = 2)
 
 dev.off()
 
@@ -220,6 +224,11 @@ trajectoryConvergence(x_scripps, type = "pairwise.asymmetric")
 # trajectoryConvergence(x_scripps, type = "multiple")   
 #### might have to take the "column" surveys out and instead use the "times" as the survey date 
 
+ScrippsConv.temp <- trajectoryConvergence(x_scripps, type = "pairwise.asymmetric")
+
+corrplot(matrix(as.vector(ScrippsConv.temp$tau)*as.numeric(ScrippsConv.temp$p.value<0.05),13,13))
+
+
 
 
 ###############################################################
@@ -252,15 +261,19 @@ final_matches <- list()
 for (yr in other_years) {
   other_df <- df %>% filter(year == yr)
   
+  df_ref <- df %>%
+    dplyr::rename(ref = rownames, ref_date = Date, ref_day = day)
+  
+  df_other <- df %>%
+    dplyr::rename(other = rownames, other_date = Date, other_day = day)
+  
   matched_pairs <- expand.grid(
     ref = ref_df$rownames,
     other = other_df$rownames,
     stringsAsFactors = FALSE
   ) %>%
-    left_join(df, by = c("ref" = "rownames")) %>%
-    rename(ref_date = Date, ref_day = day) %>%
-    left_join(df, by = c("other" = "rownames")) %>%
-    rename(other_date = Date, other_day = day) %>%
+    left_join(df_ref, by = "ref") %>%
+    left_join(df_other, by = "other") %>%
     mutate(date_diff = abs(ref_day - other_day)) %>%
     filter(date_diff <= 5) %>%
     arrange(date_diff)
@@ -312,7 +325,7 @@ matched_df <- matched_df %>%
 matched_df$point<- "1"
 
 
-matched_df %>% count(year)
+# matched_df %>% count(year)
 
 
 samples_scripps <- ggplot(matched_df, aes(x = day, y = point)) +
@@ -510,21 +523,40 @@ trajectoryDirectionality(x_scripps)
 trajectoryMetrics(x_scripps)
 trajectoryInternalVariation(x_scripps)
 
-trajectoryShifts(subsetTrajectories(x_scripps, c("2022","2023")))
+# trajectoryShifts(subsetTrajectories(x_scripps, c("2022","2023")))
 
-ScrippsConv <- trajectoryConvergence(x_scripps, type = "pairwise.asymmetric")
+ScrippsConv <- trajectoryConvergence(x_scripps, type = "pairwise.symmetric")
 #trajectoryConvergence(x_scripps, type = "multiple")   
 
 
 library(corrplot)
 
-corrplot(matrix(as.vector(ScrippsConv$tau)*as.numeric(ScrippsConv$p.value<0.05),14,14))
+corrplot(matrix(as.vector(ScrippsConv$tau)*as.numeric(ScrippsConv$p.value<0.05),13,13))
 
 # Open a pdf file
 pdf("Figures/ETA/ETA_convergence_scripps2018-2024.pdf", width = 10, height = 10) 
 # 2. Create a plot
-corrplot(matrix(as.vector(ScrippsConv$tau)*as.numeric(ScrippsConv$p.value<0.05),14,14))
+corrplot(matrix(as.vector(ScrippsConv$tau)*as.numeric(ScrippsConv$p.value<0.05),13,13))
 dev.off()
+
+
+
+scripps_D_traj_man <- trajectoryDistances(x_scripps, distance.type="DSPD")
+print(round(scripps_D_traj_man,3))
+scripps_D_traj_man_mat <- as.matrix(scripps_D_traj_man)
+scripps_D_traj_man_mat[scripps_D_traj_man_mat == 0] <- NA
+corrplot(scripps_D_traj_man_mat, is.corr = F, col = viridis(100))
+
+
+trajectoryConvergencePlot(x_scripps, type = "pairwise.symmetric")
+
+
+
+
+
+
+
+
 
 
 

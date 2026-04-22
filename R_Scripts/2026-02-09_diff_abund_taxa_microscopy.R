@@ -14,11 +14,13 @@ library(patchwork)
 library(DESeq2)
 library(gplots)
 library(viridis)
+library(ggthemes)
+library(khroma)
 
 
 # ---- read in data ----
 
-setwd("C://Users/haler/Documents/PhD-Bowman/Microscopy_time_series/")
+setwd("C://Users/haler/Documents/PhD-Bowman/Microscopy_time_series/R_Data/")
 
 # combo.full <- readRDS("2026-02-09_microscopy_o2bio_combo_full.rds")
 # combo.full <- readRDS("2026-03-23_microscopy_o2bio_combo_full.rds")
@@ -38,6 +40,16 @@ unique.diatoms <- readRDS("2026-02-09_unique_diatomss.rds")
 
 model.var.imp <- readRDS("2026-02-09_microscopy_model_var_imp.rds")
 
+o2bio.daily <- readRDS("../../O2-Ar_time_series/R_Data/2025-10-07_o2bio_est_df_daily.rds")
+
+
+setwd("C://Users/haler/Documents/PhD-Bowman/Microscopy_time_series/")
+
+
+bright <- color("bright")
+my.colorblind.colors <- bright(7)
+
+
 # # ---- quick time series of rel abund ----
 # 
 # combo.full.long <- combo.full %>% pivot_longer(cols = all_of(predictors), names_to = "Taxon", values_to = "Rel.Abund")
@@ -46,447 +58,447 @@ model.var.imp <- readRDS("2026-02-09_microscopy_model_var_imp.rds")
 #   geom_area(aes(x = Date, y = Rel.Abund, fill = Taxon)) +
 #   theme_bw()
 
-# ---- optional: hellinger transformation of phyto rel abunds ----
-
-combo.full <- combo.full[,-which(colnames(combo.full) == "O2bio.estimated")]
-combo.full <- na.omit(combo.full)
-combo.full[,predictors] <- decostand(combo.full[,predictors], method = "hellinger")
-
-
-# ---- boxplot comparison of abundances ----
-
-# combo.full$Dataset[which(substr(combo.full$Dataset, 1, 1) == "W")] <- "WE Allen"
-combo.full$Blob.status <- "Blob"
-combo.full$Blob.status[which(year(combo.full$Date) <= 2013)] <- "PreBlob"
-combo.full$Blob.status[which(year(combo.full$Date) >= 2016)] <- "PostBlob"
-
-combo.full.long <- combo.full %>% pivot_longer(cols = all_of(predictors), names_to = "Taxon", values_to = "Count")
-
-combo.full.long$Group <- NA
-combo.full.long$Group[which(combo.full.long$Taxon %in% unique.diatoms)] <- "Diatom"
-combo.full.long$Group[which(combo.full.long$Taxon %in% unique.dinos)] <- "Dinoflagellate"
-
-combo.full.long$Blob.status <- factor(combo.full.long$Blob.status, levels = c("PreBlob", "Blob", "PostBlob"))
-combo.full.long$Taxon <- factor(combo.full.long$Taxon)
-
-ggplot(data = combo.full.long) +
-  geom_boxplot(aes(x = Taxon, y = Count, fill = Blob.status)) +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 90))
-
-ggplot(data = combo.full.long) +
-  geom_boxplot(aes(x = Blob.status, y = Count, fill = Blob.status)) +
-  facet_wrap(.~Taxon, scales = "free") +
-  theme_bw()
-
-combo.full.long.dinos <- combo.full.long[which(combo.full.long$Taxon %in% unique.dinos),]
-combo.full.long.diatoms <- combo.full.long[which(combo.full.long$Taxon %in% unique.diatoms),]
-
-ggplot(data = combo.full.long.dinos) +
-  geom_boxplot(aes(x = Taxon, y = log10(Count), fill = Blob.status)) +
-  theme_bw() +
-  scale_fill_manual(values = c("blue", "red", "yellow")) +
-  theme(axis.text.x = element_text(angle = 90))
-
-ggplot(data = combo.full.long.diatoms) +
-  geom_boxplot(aes(x = Taxon, y = log10(Count), fill = Blob.status)) +
-  theme_bw() +
-  scale_fill_manual(values = c("blue", "red", "yellow")) +
-  theme(axis.text.x = element_text(angle = 90))
-
-# ---- heatmap of phytos ----
-
-combo.full.mat <- as.matrix(na.omit(combo.full[,which(colnames(combo.full) %in% predictors)]))
-rownames(combo.full.mat) <- as.character(combo.full$Date)
-
-heat.cols <- viridis::viridis(100, direction = 1)
-
-sample.colors <- c(rep("red", times = length(which(substr(rownames(combo.full.mat), start = 1, stop = 1) == "1"))), 
-                   rep("gold", times = length(which(substr(rownames(combo.full.mat), start = 1, stop = 1) == "2"))))
-
-tax.colors <- rep(NA, times = length(predictors))
-tax.colors[which(colnames(combo.full.mat) %in% unique.dinos)] <- "darkgreen"
-tax.colors[which(colnames(combo.full.mat) %in% unique.diatoms)] <- "blue"
-
-dev.off()
-heatmap.2(t(combo.full.mat),
-          trace = 'none',
-          #Colv = NA,
-          scale = NULL,
-          col = heat.cols,
-          # labRow = tally.lab.Row[selected],
-          # margins = c(10,10),
-          colCol = sample.colors,
-          colRow = tax.colors,
-          key = TRUE,
-          keysize = 2,
-          cexRow = 0.5,
-          cexCol = 0.2,
-)
-
-
-
-
-# ---- identify differentially abundant taxa using DEseq2 ----
-
-## lots of this code is from 2023-11-06_deseq(1).R
-
-
-combo.full.mat <- combo.full[,which(colnames(combo.full) %in% predictors)]
-combo.full.mat <- combo.full.mat
-
-rownames(combo.full.mat) <- combo.full$Date
-
-
-#We will convert our table to DESeqDataSet object
-countData = round(as(combo.full.mat, "matrix"), digits = 0)
-countData[is.na(countData)] <- 0
-# countData <- countData[,which(colSums(countData) >= 100)]
-
-## We will add 1 to the countData otherwise DESeq will fail with the error:
-## estimating size factors
-## Error in estimateSizeFactorsForMatrix(counts(object), locfunc = locfunc,  :
-## every gene contains at least one zero, cannot compute log geometric means
-countData<-(t(countData+1)) 
-
-
-# metadata <- as.data.frame(combo.full$Dataset)
-# colnames(metadata) <- "Dataset"
-
-metadata <- data.frame(Date = combo.full$Date)
-metadata$Blob.status <- "Blob"
-metadata$Blob.status[which(year(metadata$Date) <= 2013)] <- "PreBlob"
-metadata$Blob.status[which(year(metadata$Date) >= 2016)] <- "PostBlob"
-my.rownames <- metadata$Date
-metadata <- as.data.frame(metadata[,-1])
-rownames(metadata) <- my.rownames
-colnames(metadata) <- "Blob.status"
-
-# metadata$Dataset[which(substr(metadata$Dataset, 1,1) == "W")] <- "WEAllen"
-# metadata$heatwave.perc.90 <- factor(metadata$Dataset)
-# rownames(metadata) <- combo.full$Date
-
-dds <- DESeqDataSetFromMatrix(countData, metadata, as.formula(~Blob.status))
-## ignore warning about characters/factors
-
-#Differential expression analysis based on the Negative Binomial (a.k.a. Gamma-Poisson) distribution
-data_deseq_test = DESeq(dds)
-
-## Extract the results
-res = results(data_deseq_test, cooksCutoff = FALSE)
-res_tax = cbind(as.data.frame(res), as.matrix(countData[rownames(res), ]), OTU = rownames(res))
-
-sig =0.05  
-fold = 0
-plot.point.size = 2
-label=T
-tax.display = NULL
-tax.aggregate = "OTU"
-
-res_tax_sig = subset(res_tax, padj < sig & fold < abs(log2FoldChange))
-
-res_tax_sig <- res_tax_sig[order(res_tax_sig$padj),]
-
-## Plot the data MA plot
-library(ggplot2)
-### MA plot
-res_tax$Significant <- ifelse(rownames(res_tax) %in% rownames(res_tax_sig) , "Yes", "No")
-res_tax$Significant[is.na(res_tax$Significant)] <- "No"
-p1 <- ggplot(data = res_tax, aes(x = baseMean, y = log2FoldChange, color = Significant)) +
-  geom_point(size = plot.point.size) +
-  scale_x_log10() +
-  scale_color_manual(values=c("black", "red")) +
-  labs(x = "Mean abundance", y = "Log2 fold change")+theme_bw()
-
-p1
-
-#Running theif statement plots for names that are significant 
-if(label == T){
-  if (!is.null(tax.display)){
-    rlab <- data.frame(res_tax, Display = apply(res_tax[,c(tax.display, tax.aggregate)], 1, paste, collapse="; "))
-  } else {
-    rlab <- data.frame(res_tax, Display = res_tax[,tax.aggregate])
-  }
-  p1 <- p1 + geom_text(data = subset(rlab, Significant == "Yes"), aes(label = Display), size = 4, vjust = 1)
-}
-
-p1
-
-
-res_tax_sig <- res_tax_sig[order(res_tax_sig$log2FoldChange, decreasing = T),]
-res_tax_sig$Predictors <- factor(res_tax_sig$OTU, levels = res_tax_sig$OTU[order(res_tax_sig$log2FoldChange, decreasing = T)])
-
-ggplot(data = res_tax_sig) +
-  geom_bar(aes(x = Predictors, y = log2FoldChange, fill = log2FoldChange), stat = "identity") +
-  theme_bw() +
-  scale_fill_viridis_c() +
-  coord_flip()
-
-
-# colnames(res_tax_sig)[which(colnames(res_tax_sig) == "OTU")] <- "Predictors"
-
-taxa.df <- merge(model.var.imp, res_tax_sig, by = "Predictors", all = T)
-taxa.df$Predictors <- factor(taxa.df$Predictors, levels = taxa.df$Predictors[order(taxa.df$log2FoldChange, decreasing = T)])
-
-taxa.df$Group <- NA
-taxa.df$Group[which(taxa.df$Predictors %in% unique.diatoms)] <- "Diatom"
-taxa.df$Group[which(taxa.df$Predictors %in% unique.dinos)] <- "Dinoflagellate"
-
-ggplot(data = taxa.df) +
-  geom_bar(aes(x = Predictors, y = log2FoldChange, 
-               # fill = Variable.Importance,
-               fill = log2FoldChange
-               ), stat = "identity") +
-  theme_bw() +
-  scale_fill_viridis_c() +
-  coord_flip() +
-  theme(axis.text.y = element_text(color = rev(model.var.imp$Group))) +
-  annotate("segment", x = "bacteriastrum_spp", y = -3, xend = "bacteriastrum_spp", yend = -5,
-           arrow = arrow(type = "closed", length = unit(0.02, "npc"))) +
-  annotate("segment", x = "bacteriastrum_spp", y = 3, xend = "bacteriastrum_spp", yend = 5,
-           arrow = arrow(type = "closed", length = unit(0.02, "npc"))) +
-  # annotate("text", x = "dinophysis_acuminata", y = -4, label = "SCCOOS", size = 3) +
-  # annotate("text", x = "dinophysis_acuminata", y = 4, label = "WEAllen", size = 3) +
-  annotate("text", x = "chaetoceros_concavicornis", y = -4, label = "SCCOOS", size = 3) +
-  annotate("text", x = "chaetoceros_concavicornis", y = 4, label = "WEAllen", size = 3) +
-  # labs(fill = "Predictor \nModel Importance")
-  labs(fill = "log2FoldChange")
-
-
-
-# confirming which (+/-) is SCCOOS or WE Allen
-# ggplot(data = combo.full) +
-#   geom_boxplot(aes(x = Dataset, y = pseudonitzschia_delicatissima)) +
+# # ---- optional: hellinger transformation of phyto rel abunds ----
+# 
+# combo.full <- combo.full[,-which(colnames(combo.full) == "O2bio.estimated")]
+# combo.full <- na.omit(combo.full)
+# combo.full[,predictors] <- decostand(combo.full[,predictors], method = "hellinger")
+# 
+# 
+# # ---- boxplot comparison of abundances ----
+# 
+# # combo.full$Dataset[which(substr(combo.full$Dataset, 1, 1) == "W")] <- "WE Allen"
+# combo.full$Blob.status <- "Blob"
+# combo.full$Blob.status[which(year(combo.full$Date) <= 2013)] <- "PreBlob"
+# combo.full$Blob.status[which(year(combo.full$Date) >= 2016)] <- "PostBlob"
+# 
+# combo.full.long <- combo.full %>% pivot_longer(cols = all_of(predictors), names_to = "Taxon", values_to = "Count")
+# 
+# combo.full.long$Group <- NA
+# combo.full.long$Group[which(combo.full.long$Taxon %in% unique.diatoms)] <- "Diatom"
+# combo.full.long$Group[which(combo.full.long$Taxon %in% unique.dinos)] <- "Dinoflagellate"
+# 
+# combo.full.long$Blob.status <- factor(combo.full.long$Blob.status, levels = c("PreBlob", "Blob", "PostBlob"))
+# combo.full.long$Taxon <- factor(combo.full.long$Taxon)
+# 
+# ggplot(data = combo.full.long) +
+#   geom_boxplot(aes(x = Taxon, y = Count, fill = Blob.status)) +
+#   theme_bw() +
+#   theme(axis.text.x = element_text(angle = 90))
+# 
+# ggplot(data = combo.full.long) +
+#   geom_boxplot(aes(x = Blob.status, y = Count, fill = Blob.status)) +
+#   facet_wrap(.~Taxon, scales = "free") +
 #   theme_bw()
-
-
-# --- identify differentially abundant taxa using DESeq2 (heatwavees) ----
-
-
-combo.full.mat <- combo.full[,which(colnames(combo.full) %in% predictors)]
-combo.full.mat <- combo.full.mat*10000
-
-
-
-#We will convert our table to DESeqDataSet object
-countData = round(as(combo.full.mat, "matrix"), digits = 0)
-countData[is.na(countData)] <- 0
-# countData <- countData[,which(colSums(countData) >= 100)]
-
-## We will add 1 to the countData otherwise DESeq will fail with the error:
-## estimating size factors
-## Error in estimateSizeFactorsForMatrix(counts(object), locfunc = locfunc,  :
-## every gene contains at least one zero, cannot compute log geometric means
-countData<-(t(countData+1)) 
-
-
-metadata <- as.data.frame(combo.sio.temp$heatwave.perc.90[which(combo.sio.temp$Date %in% combo.full$Date)])
-colnames(metadata) <- "heatwave.perc.90"
-
-# metadata$Dataset[which(substr(metadata$Dataset, 1,1) == "W")] <- "WEAllen"
-metadata$heatwave.perc.90 <- factor(metadata$heatwave.perc.90)
-
-
-dds <- DESeqDataSetFromMatrix(countData, metadata, as.formula(~ heatwave.perc.90))
-
-
-#Differential expression analysis based on the Negative Binomial (a.k.a. Gamma-Poisson) distribution
-data_deseq_test = DESeq(dds)
-
-## Extract the results
-res = results(data_deseq_test, cooksCutoff = FALSE)
-res_tax = cbind(as.data.frame(res), as.matrix(countData[rownames(res), ]), OTU = rownames(res))
-
-sig =0.05  
-fold = 0
-plot.point.size = 2
-label=T
-tax.display = NULL
-tax.aggregate = "OTU"
-
-res_tax_sig = subset(res_tax, padj < sig & fold < abs(log2FoldChange))
-
-res_tax_sig <- res_tax_sig[order(res_tax_sig$padj),]
-
-## Plot the data MA plot
-library(ggplot2)
-### MA plot
-res_tax$Significant <- ifelse(rownames(res_tax) %in% rownames(res_tax_sig) , "Yes", "No")
-res_tax$Significant[is.na(res_tax$Significant)] <- "No"
-p1 <- ggplot(data = res_tax, aes(x = baseMean, y = log2FoldChange, color = Significant)) +
-  geom_point(size = plot.point.size) +
-  scale_x_log10() +
-  scale_color_manual(values=c("black", "red")) +
-  labs(x = "Mean abundance", y = "Log2 fold change")+theme_bw()
-
-p1
-
-#Running theif statement plots for names that are significant 
-if(label == T){
-  if (!is.null(tax.display)){
-    rlab <- data.frame(res_tax, Display = apply(res_tax[,c(tax.display, tax.aggregate)], 1, paste, collapse="; "))
-  } else {
-    rlab <- data.frame(res_tax, Display = res_tax[,tax.aggregate])
-  }
-  p1 <- p1 + geom_text(data = subset(rlab, Significant == "Yes"), aes(label = Display), size = 4, vjust = 1)
-}
-
-p1
-
-
-res_tax_sig <- res_tax_sig[order(res_tax_sig$log2FoldChange, decreasing = T),]
-res_tax_sig$OTU <- factor(res_tax_sig$OTU, levels = res_tax_sig$OTU[order(res_tax_sig$log2FoldChange, decreasing = T)])
-
-ggplot(data = res_tax_sig) +
-  geom_bar(aes(x = OTU, y = log2FoldChange, fill = log2FoldChange), stat = "identity") +
-  theme_bw() +
-  scale_fill_viridis_c() +
-  coord_flip()
-
-
-colnames(res_tax_sig)[which(colnames(res_tax_sig) == "OTU")] <- "Predictors"
-
-taxa.df <- merge(model.var.imp, res_tax_sig, by = "Predictors")
-taxa.df$Predictors <- factor(taxa.df$Predictors, levels = taxa.df$Predictors[order(taxa.df$log2FoldChange, decreasing = T)])
-
-taxa.df$Group <- NA
-taxa.df$Group[which(taxa.df$Predictors %in% unique.diatoms)] <- "Diatom"
-taxa.df$Group[which(taxa.df$Predictors %in% unique.dinos)] <- "Dinoflagellate"
-
-ggplot(data = taxa.df) +
-  geom_bar(aes(x = Predictors, y = log2FoldChange, fill = log2FoldChange), stat = "identity") +
-  theme_bw() +
-  scale_fill_viridis_c() +
-  coord_flip() +
-  theme(axis.text.y = element_text(color = rev(model.var.imp$Group))) +
-  annotate("segment", x = "bacteriastrum_spp", y = -3, xend = "bacteriastrum_spp", yend = -5,
-           arrow = arrow(type = "closed", length = unit(0.02, "npc"))) +
-  annotate("segment", x = "bacteriastrum_spp", y = 3, xend = "bacteriastrum_spp", yend = 5,
-           arrow = arrow(type = "closed", length = unit(0.02, "npc"))) +
-  annotate("text", x = "guinardia_striata", y = -4, label = "No Heatwave", size = 3) +
-  annotate("text", x = "guinardia_striata", y = 4, label = "Heatwave", size = 3) +
-  theme(legend.position = "none")
-
-# confirming which (+/-) is SCCOOS or WE Allen
-ggplot(data = combo.sio.temp) +
-  geom_boxplot(aes(x = heatwave.perc.90, y = ceratium_furca)) +
-  theme_bw()
-
-
-
-# --- identify differentially abundant taxa using DESeq2 (coldwavees) ----
-
-
-combo.full.mat <- combo.full[,which(colnames(combo.full) %in% predictors)]
-combo.full.mat <- combo.full.mat*10000
-
-
-
-#We will convert our table to DESeqDataSet object
-countData = round(as(combo.full.mat, "matrix"), digits = 0)
-countData[is.na(countData)] <- 0
-# countData <- countData[,which(colSums(countData) >= 100)]
-
-## We will add 1 to the countData otherwise DESeq will fail with the error:
-## estimating size factors
-## Error in estimateSizeFactorsForMatrix(counts(object), locfunc = locfunc,  :
-## every gene contains at least one zero, cannot compute log geometric means
-countData<-(t(countData+1)) 
-
-
-metadata <- as.data.frame(combo.sio.temp$coldwave.perc.90[which(combo.sio.temp$Date %in% combo.full$Date)])
-colnames(metadata) <- "coldwave.perc.90"
-
-# metadata$Dataset[which(substr(metadata$Dataset, 1,1) == "W")] <- "WEAllen"
-metadata$coldwave.perc.90 <- factor(metadata$coldwave.perc.90)
-
-
-dds <- DESeqDataSetFromMatrix(countData, metadata, as.formula(~ coldwave.perc.90))
-
-
-#Differential expression analysis based on the Negative Binomial (a.k.a. Gamma-Poisson) distribution
-data_deseq_test = DESeq(dds)
-
-## Extract the results
-res = results(data_deseq_test, cooksCutoff = FALSE)
-res_tax = cbind(as.data.frame(res), as.matrix(countData[rownames(res), ]), OTU = rownames(res))
-
-sig =0.05  
-fold = 0
-plot.point.size = 2
-label=T
-tax.display = NULL
-tax.aggregate = "OTU"
-
-res_tax_sig = subset(res_tax, padj < sig & fold < abs(log2FoldChange))
-
-res_tax_sig <- res_tax_sig[order(res_tax_sig$padj),]
-
-## Plot the data MA plot
-library(ggplot2)
-### MA plot
-res_tax$Significant <- ifelse(rownames(res_tax) %in% rownames(res_tax_sig) , "Yes", "No")
-res_tax$Significant[is.na(res_tax$Significant)] <- "No"
-p1 <- ggplot(data = res_tax, aes(x = baseMean, y = log2FoldChange, color = Significant)) +
-  geom_point(size = plot.point.size) +
-  scale_x_log10() +
-  scale_color_manual(values=c("black", "red")) +
-  labs(x = "Mean abundance", y = "Log2 fold change")+theme_bw()
-
-p1
-
-#Running theif statement plots for names that are significant 
-if(label == T){
-  if (!is.null(tax.display)){
-    rlab <- data.frame(res_tax, Display = apply(res_tax[,c(tax.display, tax.aggregate)], 1, paste, collapse="; "))
-  } else {
-    rlab <- data.frame(res_tax, Display = res_tax[,tax.aggregate])
-  }
-  p1 <- p1 + geom_text(data = subset(rlab, Significant == "Yes"), aes(label = Display), size = 4, vjust = 1)
-}
-
-p1
-
-
-res_tax_sig <- res_tax_sig[order(res_tax_sig$log2FoldChange, decreasing = T),]
-res_tax_sig$OTU <- factor(res_tax_sig$OTU, levels = res_tax_sig$OTU[order(res_tax_sig$log2FoldChange, decreasing = T)])
-
-ggplot(data = res_tax_sig) +
-  geom_bar(aes(x = OTU, y = log2FoldChange, fill = log2FoldChange), stat = "identity") +
-  theme_bw() +
-  scale_fill_viridis_c() +
-  coord_flip()
-
-
-colnames(res_tax_sig)[which(colnames(res_tax_sig) == "OTU")] <- "Predictors"
-
-taxa.df <- merge(model.var.imp, res_tax_sig, by = "Predictors")
-taxa.df$Predictors <- factor(taxa.df$Predictors, levels = taxa.df$Predictors[order(taxa.df$log2FoldChange, decreasing = T)])
-
-taxa.df$Group <- NA
-taxa.df$Group[which(taxa.df$Predictors %in% unique.diatoms)] <- "Diatom"
-taxa.df$Group[which(taxa.df$Predictors %in% unique.dinos)] <- "Dinoflagellate"
-
-ggplot(data = taxa.df) +
-  geom_bar(aes(x = Predictors, y = log2FoldChange, fill = log2FoldChange), stat = "identity") +
-  theme_bw() +
-  scale_fill_viridis_c() +
-  coord_flip() +
-  theme(axis.text.y = element_text(color = rev(model.var.imp$Group))) +
-  annotate("segment", x = "bacteriastrum_spp", y = -3, xend = "bacteriastrum_spp", yend = -5,
-           arrow = arrow(type = "closed", length = unit(0.02, "npc"))) +
-  annotate("segment", x = "bacteriastrum_spp", y = 3, xend = "bacteriastrum_spp", yend = 5,
-           arrow = arrow(type = "closed", length = unit(0.02, "npc"))) +
-  annotate("text", x = "guinardia_striata", y = -4, label = "No coldwave", size = 3) +
-  annotate("text", x = "guinardia_striata", y = 4, label = "coldwave", size = 3) +
-  theme(legend.position = "none")
-
-# confirming which (+/-) is SCCOOS or WE Allen
-ggplot(data = combo.sio.temp) +
-  geom_boxplot(aes(x = coldwave.perc.90, y = ceratium_furca)) +
-  theme_bw()
-
-
+# 
+# combo.full.long.dinos <- combo.full.long[which(combo.full.long$Taxon %in% unique.dinos),]
+# combo.full.long.diatoms <- combo.full.long[which(combo.full.long$Taxon %in% unique.diatoms),]
+# 
+# ggplot(data = combo.full.long.dinos) +
+#   geom_boxplot(aes(x = Taxon, y = log10(Count), fill = Blob.status)) +
+#   theme_bw() +
+#   scale_fill_manual(values = c("blue", "red", "yellow")) +
+#   theme(axis.text.x = element_text(angle = 90))
+# 
+# ggplot(data = combo.full.long.diatoms) +
+#   geom_boxplot(aes(x = Taxon, y = log10(Count), fill = Blob.status)) +
+#   theme_bw() +
+#   scale_fill_manual(values = c("blue", "red", "yellow")) +
+#   theme(axis.text.x = element_text(angle = 90))
+# 
+# # ---- heatmap of phytos ----
+# 
+# combo.full.mat <- as.matrix(na.omit(combo.full[,which(colnames(combo.full) %in% predictors)]))
+# rownames(combo.full.mat) <- as.character(combo.full$Date)
+# 
+# heat.cols <- viridis::viridis(100, direction = 1)
+# 
+# sample.colors <- c(rep("red", times = length(which(substr(rownames(combo.full.mat), start = 1, stop = 1) == "1"))), 
+#                    rep("gold", times = length(which(substr(rownames(combo.full.mat), start = 1, stop = 1) == "2"))))
+# 
+# tax.colors <- rep(NA, times = length(predictors))
+# tax.colors[which(colnames(combo.full.mat) %in% unique.dinos)] <- "darkgreen"
+# tax.colors[which(colnames(combo.full.mat) %in% unique.diatoms)] <- "blue"
+# 
+# dev.off()
+# heatmap.2(t(combo.full.mat),
+#           trace = 'none',
+#           #Colv = NA,
+#           scale = NULL,
+#           col = heat.cols,
+#           # labRow = tally.lab.Row[selected],
+#           # margins = c(10,10),
+#           colCol = sample.colors,
+#           colRow = tax.colors,
+#           key = TRUE,
+#           keysize = 2,
+#           cexRow = 0.5,
+#           cexCol = 0.2,
+# )
+# 
+# 
+# 
+# 
+# # ---- identify differentially abundant taxa using DEseq2 ----
+# 
+# ## lots of this code is from 2023-11-06_deseq(1).R
+# 
+# 
+# combo.full.mat <- combo.full[,which(colnames(combo.full) %in% predictors)]
+# combo.full.mat <- combo.full.mat
+# 
+# rownames(combo.full.mat) <- combo.full$Date
+# 
+# 
+# #We will convert our table to DESeqDataSet object
+# countData = round(as(combo.full.mat, "matrix"), digits = 0)
+# countData[is.na(countData)] <- 0
+# # countData <- countData[,which(colSums(countData) >= 100)]
+# 
+# ## We will add 1 to the countData otherwise DESeq will fail with the error:
+# ## estimating size factors
+# ## Error in estimateSizeFactorsForMatrix(counts(object), locfunc = locfunc,  :
+# ## every gene contains at least one zero, cannot compute log geometric means
+# countData<-(t(countData+1)) 
+# 
+# 
+# # metadata <- as.data.frame(combo.full$Dataset)
+# # colnames(metadata) <- "Dataset"
+# 
+# metadata <- data.frame(Date = combo.full$Date)
+# metadata$Blob.status <- "Blob"
+# metadata$Blob.status[which(year(metadata$Date) <= 2013)] <- "PreBlob"
+# metadata$Blob.status[which(year(metadata$Date) >= 2016)] <- "PostBlob"
+# my.rownames <- metadata$Date
+# metadata <- as.data.frame(metadata[,-1])
+# rownames(metadata) <- my.rownames
+# colnames(metadata) <- "Blob.status"
+# 
+# # metadata$Dataset[which(substr(metadata$Dataset, 1,1) == "W")] <- "WEAllen"
+# # metadata$heatwave.perc.90 <- factor(metadata$Dataset)
+# # rownames(metadata) <- combo.full$Date
+# 
+# dds <- DESeqDataSetFromMatrix(countData, metadata, as.formula(~Blob.status))
+# ## ignore warning about characters/factors
+# 
+# #Differential expression analysis based on the Negative Binomial (a.k.a. Gamma-Poisson) distribution
+# data_deseq_test = DESeq(dds)
+# 
+# ## Extract the results
+# res = results(data_deseq_test, cooksCutoff = FALSE)
+# res_tax = cbind(as.data.frame(res), as.matrix(countData[rownames(res), ]), OTU = rownames(res))
+# 
+# sig =0.05  
+# fold = 0
+# plot.point.size = 2
+# label=T
+# tax.display = NULL
+# tax.aggregate = "OTU"
+# 
+# res_tax_sig = subset(res_tax, padj < sig & fold < abs(log2FoldChange))
+# 
+# res_tax_sig <- res_tax_sig[order(res_tax_sig$padj),]
+# 
+# ## Plot the data MA plot
+# library(ggplot2)
+# ### MA plot
+# res_tax$Significant <- ifelse(rownames(res_tax) %in% rownames(res_tax_sig) , "Yes", "No")
+# res_tax$Significant[is.na(res_tax$Significant)] <- "No"
+# p1 <- ggplot(data = res_tax, aes(x = baseMean, y = log2FoldChange, color = Significant)) +
+#   geom_point(size = plot.point.size) +
+#   scale_x_log10() +
+#   scale_color_manual(values=c("black", "red")) +
+#   labs(x = "Mean abundance", y = "Log2 fold change")+theme_bw()
+# 
+# p1
+# 
+# #Running theif statement plots for names that are significant 
+# if(label == T){
+#   if (!is.null(tax.display)){
+#     rlab <- data.frame(res_tax, Display = apply(res_tax[,c(tax.display, tax.aggregate)], 1, paste, collapse="; "))
+#   } else {
+#     rlab <- data.frame(res_tax, Display = res_tax[,tax.aggregate])
+#   }
+#   p1 <- p1 + geom_text(data = subset(rlab, Significant == "Yes"), aes(label = Display), size = 4, vjust = 1)
+# }
+# 
+# p1
+# 
+# 
+# res_tax_sig <- res_tax_sig[order(res_tax_sig$log2FoldChange, decreasing = T),]
+# res_tax_sig$Predictors <- factor(res_tax_sig$OTU, levels = res_tax_sig$OTU[order(res_tax_sig$log2FoldChange, decreasing = T)])
+# 
+# ggplot(data = res_tax_sig) +
+#   geom_bar(aes(x = Predictors, y = log2FoldChange, fill = log2FoldChange), stat = "identity") +
+#   theme_bw() +
+#   scale_fill_viridis_c() +
+#   coord_flip()
+# 
+# 
+# # colnames(res_tax_sig)[which(colnames(res_tax_sig) == "OTU")] <- "Predictors"
+# 
+# taxa.df <- merge(model.var.imp, res_tax_sig, by = "Predictors", all = T)
+# taxa.df$Predictors <- factor(taxa.df$Predictors, levels = taxa.df$Predictors[order(taxa.df$log2FoldChange, decreasing = T)])
+# 
+# taxa.df$Group <- NA
+# taxa.df$Group[which(taxa.df$Predictors %in% unique.diatoms)] <- "Diatom"
+# taxa.df$Group[which(taxa.df$Predictors %in% unique.dinos)] <- "Dinoflagellate"
+# 
+# ggplot(data = taxa.df) +
+#   geom_bar(aes(x = Predictors, y = log2FoldChange, 
+#                # fill = Variable.Importance,
+#                fill = log2FoldChange
+#                ), stat = "identity") +
+#   theme_bw() +
+#   scale_fill_viridis_c() +
+#   coord_flip() +
+#   theme(axis.text.y = element_text(color = rev(model.var.imp$Group))) +
+#   annotate("segment", x = "bacteriastrum_spp", y = -3, xend = "bacteriastrum_spp", yend = -5,
+#            arrow = arrow(type = "closed", length = unit(0.02, "npc"))) +
+#   annotate("segment", x = "bacteriastrum_spp", y = 3, xend = "bacteriastrum_spp", yend = 5,
+#            arrow = arrow(type = "closed", length = unit(0.02, "npc"))) +
+#   # annotate("text", x = "dinophysis_acuminata", y = -4, label = "SCCOOS", size = 3) +
+#   # annotate("text", x = "dinophysis_acuminata", y = 4, label = "WEAllen", size = 3) +
+#   annotate("text", x = "chaetoceros_concavicornis", y = -4, label = "SCCOOS", size = 3) +
+#   annotate("text", x = "chaetoceros_concavicornis", y = 4, label = "WEAllen", size = 3) +
+#   # labs(fill = "Predictor \nModel Importance")
+#   labs(fill = "log2FoldChange")
+# 
+# 
+# 
+# # confirming which (+/-) is SCCOOS or WE Allen
+# # ggplot(data = combo.full) +
+# #   geom_boxplot(aes(x = Dataset, y = pseudonitzschia_delicatissima)) +
+# #   theme_bw()
+# 
+# 
+# # --- identify differentially abundant taxa using DESeq2 (heatwavees) ----
+# 
+# 
+# combo.full.mat <- combo.full[,which(colnames(combo.full) %in% predictors)]
+# combo.full.mat <- combo.full.mat*10000
+# 
+# 
+# 
+# #We will convert our table to DESeqDataSet object
+# countData = round(as(combo.full.mat, "matrix"), digits = 0)
+# countData[is.na(countData)] <- 0
+# # countData <- countData[,which(colSums(countData) >= 100)]
+# 
+# ## We will add 1 to the countData otherwise DESeq will fail with the error:
+# ## estimating size factors
+# ## Error in estimateSizeFactorsForMatrix(counts(object), locfunc = locfunc,  :
+# ## every gene contains at least one zero, cannot compute log geometric means
+# countData<-(t(countData+1)) 
+# 
+# 
+# metadata <- as.data.frame(combo.sio.temp$heatwave.perc.90[which(combo.sio.temp$Date %in% combo.full$Date)])
+# colnames(metadata) <- "heatwave.perc.90"
+# 
+# # metadata$Dataset[which(substr(metadata$Dataset, 1,1) == "W")] <- "WEAllen"
+# metadata$heatwave.perc.90 <- factor(metadata$heatwave.perc.90)
+# 
+# 
+# dds <- DESeqDataSetFromMatrix(countData, metadata, as.formula(~ heatwave.perc.90))
+# 
+# 
+# #Differential expression analysis based on the Negative Binomial (a.k.a. Gamma-Poisson) distribution
+# data_deseq_test = DESeq(dds)
+# 
+# ## Extract the results
+# res = results(data_deseq_test, cooksCutoff = FALSE)
+# res_tax = cbind(as.data.frame(res), as.matrix(countData[rownames(res), ]), OTU = rownames(res))
+# 
+# sig =0.05  
+# fold = 0
+# plot.point.size = 2
+# label=T
+# tax.display = NULL
+# tax.aggregate = "OTU"
+# 
+# res_tax_sig = subset(res_tax, padj < sig & fold < abs(log2FoldChange))
+# 
+# res_tax_sig <- res_tax_sig[order(res_tax_sig$padj),]
+# 
+# ## Plot the data MA plot
+# library(ggplot2)
+# ### MA plot
+# res_tax$Significant <- ifelse(rownames(res_tax) %in% rownames(res_tax_sig) , "Yes", "No")
+# res_tax$Significant[is.na(res_tax$Significant)] <- "No"
+# p1 <- ggplot(data = res_tax, aes(x = baseMean, y = log2FoldChange, color = Significant)) +
+#   geom_point(size = plot.point.size) +
+#   scale_x_log10() +
+#   scale_color_manual(values=c("black", "red")) +
+#   labs(x = "Mean abundance", y = "Log2 fold change")+theme_bw()
+# 
+# p1
+# 
+# #Running theif statement plots for names that are significant 
+# if(label == T){
+#   if (!is.null(tax.display)){
+#     rlab <- data.frame(res_tax, Display = apply(res_tax[,c(tax.display, tax.aggregate)], 1, paste, collapse="; "))
+#   } else {
+#     rlab <- data.frame(res_tax, Display = res_tax[,tax.aggregate])
+#   }
+#   p1 <- p1 + geom_text(data = subset(rlab, Significant == "Yes"), aes(label = Display), size = 4, vjust = 1)
+# }
+# 
+# p1
+# 
+# 
+# res_tax_sig <- res_tax_sig[order(res_tax_sig$log2FoldChange, decreasing = T),]
+# res_tax_sig$OTU <- factor(res_tax_sig$OTU, levels = res_tax_sig$OTU[order(res_tax_sig$log2FoldChange, decreasing = T)])
+# 
+# ggplot(data = res_tax_sig) +
+#   geom_bar(aes(x = OTU, y = log2FoldChange, fill = log2FoldChange), stat = "identity") +
+#   theme_bw() +
+#   scale_fill_viridis_c() +
+#   coord_flip()
+# 
+# 
+# colnames(res_tax_sig)[which(colnames(res_tax_sig) == "OTU")] <- "Predictors"
+# 
+# taxa.df <- merge(model.var.imp, res_tax_sig, by = "Predictors")
+# taxa.df$Predictors <- factor(taxa.df$Predictors, levels = taxa.df$Predictors[order(taxa.df$log2FoldChange, decreasing = T)])
+# 
+# taxa.df$Group <- NA
+# taxa.df$Group[which(taxa.df$Predictors %in% unique.diatoms)] <- "Diatom"
+# taxa.df$Group[which(taxa.df$Predictors %in% unique.dinos)] <- "Dinoflagellate"
+# 
+# ggplot(data = taxa.df) +
+#   geom_bar(aes(x = Predictors, y = log2FoldChange, fill = log2FoldChange), stat = "identity") +
+#   theme_bw() +
+#   scale_fill_viridis_c() +
+#   coord_flip() +
+#   theme(axis.text.y = element_text(color = rev(model.var.imp$Group))) +
+#   annotate("segment", x = "bacteriastrum_spp", y = -3, xend = "bacteriastrum_spp", yend = -5,
+#            arrow = arrow(type = "closed", length = unit(0.02, "npc"))) +
+#   annotate("segment", x = "bacteriastrum_spp", y = 3, xend = "bacteriastrum_spp", yend = 5,
+#            arrow = arrow(type = "closed", length = unit(0.02, "npc"))) +
+#   annotate("text", x = "guinardia_striata", y = -4, label = "No Heatwave", size = 3) +
+#   annotate("text", x = "guinardia_striata", y = 4, label = "Heatwave", size = 3) +
+#   theme(legend.position = "none")
+# 
+# # confirming which (+/-) is SCCOOS or WE Allen
+# ggplot(data = combo.sio.temp) +
+#   geom_boxplot(aes(x = heatwave.perc.90, y = ceratium_furca)) +
+#   theme_bw()
+# 
+# 
+# 
+# # --- identify differentially abundant taxa using DESeq2 (coldwavees) ----
+# 
+# 
+# combo.full.mat <- combo.full[,which(colnames(combo.full) %in% predictors)]
+# combo.full.mat <- combo.full.mat*10000
+# 
+# 
+# 
+# #We will convert our table to DESeqDataSet object
+# countData = round(as(combo.full.mat, "matrix"), digits = 0)
+# countData[is.na(countData)] <- 0
+# # countData <- countData[,which(colSums(countData) >= 100)]
+# 
+# ## We will add 1 to the countData otherwise DESeq will fail with the error:
+# ## estimating size factors
+# ## Error in estimateSizeFactorsForMatrix(counts(object), locfunc = locfunc,  :
+# ## every gene contains at least one zero, cannot compute log geometric means
+# countData<-(t(countData+1)) 
+# 
+# 
+# metadata <- as.data.frame(combo.sio.temp$coldwave.perc.90[which(combo.sio.temp$Date %in% combo.full$Date)])
+# colnames(metadata) <- "coldwave.perc.90"
+# 
+# # metadata$Dataset[which(substr(metadata$Dataset, 1,1) == "W")] <- "WEAllen"
+# metadata$coldwave.perc.90 <- factor(metadata$coldwave.perc.90)
+# 
+# 
+# dds <- DESeqDataSetFromMatrix(countData, metadata, as.formula(~ coldwave.perc.90))
+# 
+# 
+# #Differential expression analysis based on the Negative Binomial (a.k.a. Gamma-Poisson) distribution
+# data_deseq_test = DESeq(dds)
+# 
+# ## Extract the results
+# res = results(data_deseq_test, cooksCutoff = FALSE)
+# res_tax = cbind(as.data.frame(res), as.matrix(countData[rownames(res), ]), OTU = rownames(res))
+# 
+# sig =0.05  
+# fold = 0
+# plot.point.size = 2
+# label=T
+# tax.display = NULL
+# tax.aggregate = "OTU"
+# 
+# res_tax_sig = subset(res_tax, padj < sig & fold < abs(log2FoldChange))
+# 
+# res_tax_sig <- res_tax_sig[order(res_tax_sig$padj),]
+# 
+# ## Plot the data MA plot
+# library(ggplot2)
+# ### MA plot
+# res_tax$Significant <- ifelse(rownames(res_tax) %in% rownames(res_tax_sig) , "Yes", "No")
+# res_tax$Significant[is.na(res_tax$Significant)] <- "No"
+# p1 <- ggplot(data = res_tax, aes(x = baseMean, y = log2FoldChange, color = Significant)) +
+#   geom_point(size = plot.point.size) +
+#   scale_x_log10() +
+#   scale_color_manual(values=c("black", "red")) +
+#   labs(x = "Mean abundance", y = "Log2 fold change")+theme_bw()
+# 
+# p1
+# 
+# #Running theif statement plots for names that are significant 
+# if(label == T){
+#   if (!is.null(tax.display)){
+#     rlab <- data.frame(res_tax, Display = apply(res_tax[,c(tax.display, tax.aggregate)], 1, paste, collapse="; "))
+#   } else {
+#     rlab <- data.frame(res_tax, Display = res_tax[,tax.aggregate])
+#   }
+#   p1 <- p1 + geom_text(data = subset(rlab, Significant == "Yes"), aes(label = Display), size = 4, vjust = 1)
+# }
+# 
+# p1
+# 
+# 
+# res_tax_sig <- res_tax_sig[order(res_tax_sig$log2FoldChange, decreasing = T),]
+# res_tax_sig$OTU <- factor(res_tax_sig$OTU, levels = res_tax_sig$OTU[order(res_tax_sig$log2FoldChange, decreasing = T)])
+# 
+# ggplot(data = res_tax_sig) +
+#   geom_bar(aes(x = OTU, y = log2FoldChange, fill = log2FoldChange), stat = "identity") +
+#   theme_bw() +
+#   scale_fill_viridis_c() +
+#   coord_flip()
+# 
+# 
+# colnames(res_tax_sig)[which(colnames(res_tax_sig) == "OTU")] <- "Predictors"
+# 
+# taxa.df <- merge(model.var.imp, res_tax_sig, by = "Predictors")
+# taxa.df$Predictors <- factor(taxa.df$Predictors, levels = taxa.df$Predictors[order(taxa.df$log2FoldChange, decreasing = T)])
+# 
+# taxa.df$Group <- NA
+# taxa.df$Group[which(taxa.df$Predictors %in% unique.diatoms)] <- "Diatom"
+# taxa.df$Group[which(taxa.df$Predictors %in% unique.dinos)] <- "Dinoflagellate"
+# 
+# ggplot(data = taxa.df) +
+#   geom_bar(aes(x = Predictors, y = log2FoldChange, fill = log2FoldChange), stat = "identity") +
+#   theme_bw() +
+#   scale_fill_viridis_c() +
+#   coord_flip() +
+#   theme(axis.text.y = element_text(color = rev(model.var.imp$Group))) +
+#   annotate("segment", x = "bacteriastrum_spp", y = -3, xend = "bacteriastrum_spp", yend = -5,
+#            arrow = arrow(type = "closed", length = unit(0.02, "npc"))) +
+#   annotate("segment", x = "bacteriastrum_spp", y = 3, xend = "bacteriastrum_spp", yend = 5,
+#            arrow = arrow(type = "closed", length = unit(0.02, "npc"))) +
+#   annotate("text", x = "guinardia_striata", y = -4, label = "No coldwave", size = 3) +
+#   annotate("text", x = "guinardia_striata", y = 4, label = "coldwave", size = 3) +
+#   theme(legend.position = "none")
+# 
+# # confirming which (+/-) is SCCOOS or WE Allen
+# ggplot(data = combo.sio.temp) +
+#   geom_boxplot(aes(x = coldwave.perc.90, y = ceratium_furca)) +
+#   theme_bw()
+# 
+# 
 
 # ---- look at phytoplankton count community structure through NMDS ----
 
@@ -498,10 +510,12 @@ ggplot(data = model.var.imp[order(model.var.imp$Variable.Importance, decreasing 
   theme_bw() +
   coord_flip()
 
-my.top.pred.taxa <- as.character(model.var.imp$Predictors[which(model.var.imp$Variable.Importance >= 5)])
+# # ---- toggle top predictors (optional) ----
+# my.top.pred.taxa <- as.character(model.var.imp$Predictors[which(model.var.imp$Variable.Importance >= 5)])
+# com.structure.for.nmds <- combo.full[,which(colnames(combo.full) %in% c(my.top.pred.taxa, "Date"))]
+# 
 
-com.structure.for.nmds <- combo.full[,which(colnames(combo.full) %in% c(my.top.pred.taxa, "Date"))]
-
+#### ----
 
 ## for whatever reason, something is fucky with 1924-03-17
 # com.structure.for.nmds <- com.structure.for.nmds[which(com.structure.for.nmds$Date != parse_date_time("1924-03-17", orders = "Ymd")),]
@@ -744,18 +758,51 @@ for(t in 1:length(colnames(sccoos.phytos))){
   
 }
 
+
+# phyto.nmds.temp$diff.date <- difftime(phyto.nmds.temp$Date, phyto.nmds.temp$Date[1], units = "days")
+# summary(lm(as.numeric(phyto.nmds.temp$Date)~phyto.nmds$MDS1))
+# summary(lm(as.numeric(phyto.nmds.temp$Date)~phyto.nmds$MDS2))
+
+
 # ---- combine with heatwave data ----
 
 # combo.sio.temp <- readRDS("2026-02-14_combo_sio_temp.rds") ## heatwaves only outside climatological baseline
-combo.sio.temp <- readRDS("2026-04-14_combo_sio_temp.rds") ## all heatwaves
-combo.sio.temp.to.merge <- combo.sio.temp[,c("SURF_TEMP_C", "heatwave.perc.90", "coldwave.perc.90", "Date")]
+combo.sio.temp <- readRDS("R_Data/2026-04-14_combo_sio_temp.rds") ## all heatwaves
+combo.sio.temp.to.merge <- combo.sio.temp[,c("SURF_TEMP_C", "SURF_TEMP_ANOM", "heatwave.perc.90", "coldwave.perc.90", "Date")]
 
-phyto.nmds.temp <- merge(x = phyto.nmds, y = combo.sio.temp.to.merge, by = "Date", all.x = T, all.y = F)
+phyto.nmds.temp <- merge(x = phyto.nmds, y = combo.sio.temp.to.merge, by = "Date", all.x = T, all.y = T)
 
 
 ## colored by surface water temp
 ggplot() +
   geom_point(data = phyto.nmds.temp, aes(x = MDS4, y = MDS2, shape = Dataset, color = SURF_TEMP_C), alpha = 1, size = 3) +
+  # geom_point(data = phyto.nmds[which(phyto.nmds$Year >= 2014),], aes(x = MDS1, y = MDS2), color = "red", alpha = 1, size = 3, shape = "+") +
+  # geom_point(data = combo[which(is.na(combo$O2bio.estimated) == T),], aes(x = NMDS1, y = NMDS2), color = "grey69", alpha = 0.2, size = 3) +
+  # scale_color_viridis_c() +
+  # geom_text(aes(x = NMDS1, y = NMDS2, label = sample.date)) +
+  # scale_color_manual(values = my.year.colors) +
+  # scale_color_gradient2(low = "blue", high = "red", mid = "white") +
+  scale_color_viridis_c() +
+  # geom_path(aes(x = NMDS1, y = NMDS2), size = 0.5, alpha = 0.3) +
+  
+  # geom_segment(data = phyto.species[head(order(phyto.species$NMS.length, decreasing = TRUE), n = 10),], aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2), color = "black") +
+  
+  # geom_text(data = phyto.species[head(order(phyto.species$NMS.length, decreasing = TRUE), n = 10),], aes(x = jitter(NMDS1*1.2, factor = 100), y = jitter(NMDS2*1.2, factor = 200), label = taxon), color = "black") +
+  # geom_segment(data = phyto.species.model.predictors, aes(x = 0, y = 0, xend = MDS1, yend = MDS2), color = "green4") +
+  # geom_text(data = phyto.species.model.predictors, aes(x = MDS1*scale.factor, y = MDS2*scale.factor, label = rownames(phyto.species.model.predictors)), color = "green4") +
+  labs(color = "Dataset", x = "Dim 4", y = "Dim 2") +
+  # ggtitle("NMDS: Microbial Community Time Series") +
+  theme_bw() +
+  theme(panel.grid = element_blank()) +
+  theme(axis.title = element_text(size = 14, face = "bold"), 
+        axis.text = element_text(size = 12), 
+        legend.text = element_text(size = 12), 
+        legend.title = element_text(size = 14, face = "bold"),
+        title = element_text(face = "bold")) 
+
+## colored by surface water temp
+ggplot() +
+  geom_point(data = phyto.nmds.temp, aes(x = MDS4, y = MDS2, shape = Dataset, color = SURF_TEMP_ANOM), alpha = 1, size = 3) +
   # geom_point(data = phyto.nmds[which(phyto.nmds$Year >= 2014),], aes(x = MDS1, y = MDS2), color = "red", alpha = 1, size = 3, shape = "+") +
   # geom_point(data = combo[which(is.na(combo$O2bio.estimated) == T),], aes(x = NMDS1, y = NMDS2), color = "grey69", alpha = 0.2, size = 3) +
   # scale_color_viridis_c() +
@@ -1159,6 +1206,9 @@ summary(lm(phyto.nmds.temp$SURF_TEMP_C~phyto.nmds.temp$MDS4))
 
 
 
+
+
+
 # ---- plot time series of most diff abundant MDS1 ----
 
 phytos.combo <- merge(phyto.nmds.temp, com.structure.for.nmds.to.merge, by = c("Date", "Dataset"))
@@ -1167,23 +1217,29 @@ phytos.combo <- merge(phyto.nmds.temp, com.structure.for.nmds.to.merge, by = c("
 my.Dim1.df <- data.frame(taxon = rep(NA, length(predictors)), adj.R2 = rep(NA, length(predictors)), p.val = rep(NA, length(predictors)))
 
 for(t in 1:length(predictors)){
-  
+
   my.taxon <- predictors[t]
-  
+
   temp <- summary(lm(phytos.combo[,which(colnames(phytos.combo) == my.taxon)]~phytos.combo$MDS1))
-  
+
   my.Dim1.df$taxon[t] <- my.taxon
   my.Dim1.df$adj.R2[t] <- temp$adj.r.squared
   my.Dim1.df$p.val[t] <- temp$coefficients[2,4]
-  
+
 }
 
 my.Dim1.df <- my.Dim1.df[which(my.Dim1.df$adj.R2 > 0 & my.Dim1.df$p.val < 0.05),]
 my.Dim1.df <- my.Dim1.df[order(my.Dim1.df$adj.R2),]
 my.Dim1.df$taxon <- factor(my.Dim1.df$taxon, levels = my.Dim1.df$taxon[order(my.Dim1.df$adj.R2)])
 
+my.Dim1.df$group <- "Dinoflagellate"
+my.Dim1.df$group[which(my.Dim1.df$taxon %in% unique.diatoms)] <- "Diatom"
+my.Dim1.df$group[which(grepl("diatom", my.Dim1.df$taxon) == T)] <- "Diatom"
+
 ggplot(data = my.Dim1.df[order(my.Dim1.df$adj.R2),]) +
-  geom_bar(aes(x = taxon, y = adj.R2), stat = "identity") +
+  geom_bar(aes(x = taxon, y = adj.R2, fill = group), stat = "identity") +
+  scale_fill_manual(values = viridis(n=4, option = "inferno")[2:3]) +
+  labs(y = expression("Dim. 1 Correaltion Adj. R"^"2"), x = "Taxon", fill = "Phytoplankton Group") +
   theme_bw() +
   coord_flip()
 
@@ -1205,9 +1261,9 @@ ggplot() +
   # scale_color_gradient2(low = "blue", high = "red", mid = "white") +
   scale_color_viridis_c() +
   # geom_path(aes(x = NMDS1, y = NMDS2), size = 0.5, alpha = 0.3) +
-  
+
   # geom_segment(data = phyto.species[head(order(phyto.species$NMS.length, decreasing = TRUE), n = 10),], aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2), color = "black") +
-  
+
   # geom_text(data = phyto.species[head(order(phyto.species$NMS.length, decreasing = TRUE), n = 10),], aes(x = jitter(NMDS1*1.2, factor = 100), y = jitter(NMDS2*1.2, factor = 200), label = taxon), color = "black") +
   # geom_segment(data = phyto.species.model.predictors, aes(x = 0, y = 0, xend = MDS1, yend = MDS2), color = "green4") +
   # geom_text(data = phyto.species.model.predictors, aes(x = MDS1*scale.factor, y = MDS2*scale.factor, label = rownames(phyto.species.model.predictors)), color = "green4") +
@@ -1215,11 +1271,11 @@ ggplot() +
   # ggtitle("NMDS: Microbial Community Time Series") +
   theme_bw() +
   theme(panel.grid = element_blank()) +
-  theme(axis.title = element_text(size = 14, face = "bold"), 
-        axis.text = element_text(size = 12), 
-        legend.text = element_text(size = 12), 
+  theme(axis.title = element_text(size = 14, face = "bold"),
+        axis.text = element_text(size = 12),
+        legend.text = element_text(size = 12),
         legend.title = element_text(size = 14, face = "bold"),
-        title = element_text(face = "bold")) 
+        title = element_text(face = "bold"))
 
 ggplot() +
   geom_point(data = phytos.combo, aes(x = MDS1, y = MDS4, color = O2bio.predicted.altered), alpha = 1, size = 3) +
@@ -1231,9 +1287,9 @@ ggplot() +
   # scale_color_gradient2(low = "blue", high = "red", mid = "white") +
   scale_color_viridis_c() +
   # geom_path(aes(x = NMDS1, y = NMDS2), size = 0.5, alpha = 0.3) +
-  
+
   # geom_segment(data = phyto.species[head(order(phyto.species$NMS.length, decreasing = TRUE), n = 10),], aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2), color = "black") +
-  
+
   # geom_text(data = phyto.species[head(order(phyto.species$NMS.length, decreasing = TRUE), n = 10),], aes(x = jitter(NMDS1*1.2, factor = 100), y = jitter(NMDS2*1.2, factor = 200), label = taxon), color = "black") +
   # geom_segment(data = phyto.species.model.predictors, aes(x = 0, y = 0, xend = MDS1, yend = MDS2), color = "green4") +
   # geom_text(data = phyto.species.model.predictors, aes(x = MDS1*scale.factor, y = MDS2*scale.factor, label = rownames(phyto.species.model.predictors)), color = "green4") +
@@ -1241,11 +1297,11 @@ ggplot() +
   # ggtitle("NMDS: Microbial Community Time Series") +
   theme_bw() +
   theme(panel.grid = element_blank()) +
-  theme(axis.title = element_text(size = 14, face = "bold"), 
-        axis.text = element_text(size = 12), 
-        legend.text = element_text(size = 12), 
+  theme(axis.title = element_text(size = 14, face = "bold"),
+        axis.text = element_text(size = 12),
+        legend.text = element_text(size = 12),
         legend.title = element_text(size = 14, face = "bold"),
-        title = element_text(face = "bold")) 
+        title = element_text(face = "bold"))
 
 
 
@@ -1336,18 +1392,28 @@ phyto.df$Date <- parse_date_time(rownames(phyto.df), orders = "Ymd")
 ggplot(phyto.df) +
   geom_line(aes(x = Date, y = richness)) +
   geom_smooth(aes(x = Date, y = richness), method = "loess") +
-  theme_bw()
+  labs(x = "Date", y = "Phytoplankton Richness") +
+  theme_bw() +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") 
+
 
 ggplot(phyto.df) +
   geom_line(aes(x = Date, y = shannon.div)) +
   geom_smooth(aes(x = Date, y = shannon.div), method = "loess") +
-  theme_bw()
+  labs(x = "Date", y = "Shannon Diversity") +
+  theme_bw() +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") 
+
 
 phyto.df$Blob.status <- "Blob"
 phyto.df$Blob.status[which(year(phyto.df$Date) <= 2013)] <- "PreBlob"
 phyto.df$Blob.status[which(year(phyto.df$Date) >= 2016)] <- "PostBlob"
 phyto.df$Blob.status[which(year(phyto.df$Date) >= 2022)] <- "Post2022Shift"
 phyto.df$Blob.status <- factor(phyto.df$Blob.status, levels = c("PreBlob", "Blob", "PostBlob", "Post2022Shift"))
+
+
+
+
 
 ## Richness ##
 my.aov <- aov(phyto.df$richness~phyto.df$Blob.status)
@@ -1372,16 +1438,17 @@ label_df <- data.frame(
 )
 
 
-ggplot(phyto.df) +
-  geom_boxplot(aes(x = Blob.status, y = richness, fill = Blob.status)) +
+plot.richness.box <- ggplot(phyto.df) +
+  geom_boxplot(aes(x = Blob.status, y = richness), fill = my.colorblind.colors[6]) +
   scale_fill_manual(values = my.colors.blob.2022) +
-  labs(x = "Time Period", y = "Phytoplankton Richness") +
+  labs(x = "Time Period", y = "Phytoplankton \n Richness") +
   guides(fill = "none") +
-  geom_text(
-    data = label_df,
-    aes(x = Blob.status, y = log10(y_pos*2), label = Letter),
-    inherit.aes = FALSE) +
-  theme_bw()
+  # geom_text(
+  #   data = label_df,
+  #   aes(x = Blob.status, y = log10(y_pos), label = Letter),
+  #   inherit.aes = FALSE) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
 
 
 ## Shannon Diversity ##
@@ -1407,27 +1474,35 @@ label_df <- data.frame(
 )
 
 
-ggplot(phyto.df) +
-  geom_boxplot(aes(x = Blob.status, y = shannon.div, fill = Blob.status)) +
+plot.shannon.div.box <- ggplot(phyto.df) +
+  geom_boxplot(aes(x = Blob.status, y = shannon.div), fill = my.colorblind.colors[1]) +
   scale_fill_manual(values = my.colors.blob.2022) +
-  labs(x = "Time Period", y = "Phytoplankton Shannon Diversity") +
+  labs(x = "Time Period", y = "Phytoplankton \n Diversity") +
   guides(fill = "none") +
-  geom_text(
-    data = label_df,
-    aes(x = Blob.status, y = log10(y_pos*2), label = Letter),
-    inherit.aes = FALSE) +
-  theme_bw()
+  # geom_text(
+  #   data = label_df,
+  #   aes(x = Blob.status, y = log10(y_pos*2), label = Letter),
+  #   inherit.aes = FALSE) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
 
 
 ## O2bio ##
 
-phyto.df <- merge(phyto.df, combo[,which(colnames(combo) %in% c("Date", "O2bio.predicted.altered"))])
+phyto.df.o2biodates <- merge(phyto.df, o2bio.daily[,which(colnames(o2bio.daily) %in% c("Date", "O2bio.estimated"))], all = T)
 
-my.aov <- aov(phyto.df$O2bio.predicted.altered~phyto.df$Blob.status)
+phyto.df.o2biodates$Blob.status <- "Blob"
+phyto.df.o2biodates$Blob.status[which(year(phyto.df.o2biodates$Date) <= 2013)] <- "PreBlob"
+phyto.df.o2biodates$Blob.status[which(year(phyto.df.o2biodates$Date) >= 2016)] <- "PostBlob"
+phyto.df.o2biodates$Blob.status[which(year(phyto.df.o2biodates$Date) >= 2022)] <- "Post2022Shift"
+phyto.df.o2biodates$Blob.status <- factor(phyto.df.o2biodates$Blob.status, levels = c("PreBlob", "Blob", "PostBlob", "Post2022Shift"))
+
+
+my.aov <- aov(phyto.df.o2biodates$O2bio.estimated~phyto.df.o2biodates$Blob.status)
 
 my.tukey <- TukeyHSD(my.aov)
 
-my.tukey.results <- my.tukey$`phyto.df$Blob.status`
+my.tukey.results <- my.tukey$`phyto.df.o2biodates$Blob.status`
 
 my.df <- as.data.frame(my.tukey.results[which(my.tukey.results[,4] < 0.05), 4])
 my.df$period.comparison <- rownames(my.df)
@@ -1436,7 +1511,7 @@ library(multcompView)
 
 my.letters <- multcompLetters4(my.aov, my.tukey)[[1]]$Letters
 
-y_max <- tapply(phyto.df$O2bio.predicted.altered, phyto.df$Blob.status, max, na.rm = TRUE)
+y_max <- tapply(phyto.df.o2biodates$O2bio.estimated, phyto.df.o2biodates$Blob.status, max, na.rm = TRUE)
 
 label_df <- data.frame(
   Blob.status = names(my.letters),
@@ -1445,16 +1520,17 @@ label_df <- data.frame(
 )
 
 
-ggplot(phyto.df) +
-  geom_boxplot(aes(x = Blob.status, y = O2bio.predicted.altered, fill = Blob.status)) +
+plot.o2bio.box <- ggplot(phyto.df.o2biodates) +
+  geom_boxplot(aes(x = Blob.status, y = O2bio.estimated), fill = "black") +
   scale_fill_manual(values = my.colors.blob.2022) +
-  labs(x = "Time Period", y = "Predicted [O2]bio") +
+  labs(x = "Time Period", y = "[O2]bio (uM)") +
   guides(fill = "none") +
-  geom_text(
-    data = label_df,
-    aes(x = Blob.status, y = log10(y_pos*2), label = Letter),
-    inherit.aes = FALSE) +
-  theme_bw()
+  # geom_text(
+  #   data = label_df,
+  #   aes(x = Blob.status, y = log10(y_pos*2), label = Letter),
+  #   inherit.aes = FALSE) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
 
 
 
@@ -1484,20 +1560,116 @@ label_df <- data.frame(
 )
 
 
-ggplot(phyto.df) +
-  geom_boxplot(aes(x = Blob.status, y = SURF_TEMP_C, fill = Blob.status)) +
-  scale_fill_manual(values = my.colors.blob.2022) +
-  labs(x = "Time Period", y = "Surface Water Temperature (C)") +
+plot.temp.box <- ggplot(phyto.df) +
+  geom_boxplot(aes(x = Blob.status, y = SURF_TEMP_C), fill = my.colorblind.colors[2]) +
+  # scale_fill_manual(values = my.colors.blob.2022) +
+  labs(x = "Time Period", y = "Surface Water \n Temperature (C)") +
   guides(fill = "none") +
-  geom_text(
-    data = label_df,
-    aes(x = Blob.status, y = log10(y_pos*2), label = Letter),
-    inherit.aes = FALSE) +
-  theme_bw()
+  # geom_text(
+  #   data = label_df,
+  #   aes(x = Blob.status, y = y_pos, label = Letter),
+  #   inherit.aes = FALSE) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+ggplot(phyto.df) +
+  geom_line(aes(x = Date, y = SURF_TEMP_C)) +
+  geom_smooth(aes(x = Date, y = SURF_TEMP_C), method = "loess") +
+  labs(x = "Date", y = "Surface Water Temperature (C)") +
+  theme_bw() +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") 
+
+## water temperature anomaly ##
+
+phyto.df <- merge(phyto.df, combo.sio.temp[,which(colnames(combo.sio.temp) %in% c("Date", "SURF_TEMP_ANOM"))])
+
+my.aov <- aov(phyto.df$SURF_TEMP_ANOM~phyto.df$Blob.status)
+
+my.tukey <- TukeyHSD(my.aov)
+
+my.tukey.results <- my.tukey$`phyto.df$Blob.status`
+
+my.df <- as.data.frame(my.tukey.results[which(my.tukey.results[,4] < 0.05), 4])
+my.df$period.comparison <- rownames(my.df)
+
+library(multcompView)
+
+my.letters <- multcompLetters4(my.aov, my.tukey)[[1]]$Letters
+
+y_max <- tapply(phyto.df$SURF_TEMP_ANOM, phyto.df$Blob.status, max, na.rm = TRUE)
+
+label_df <- data.frame(
+  Blob.status = names(my.letters),
+  Letter = my.letters,
+  y_pos = y_max[names(my.letters)] + 0.2  # adjust spacing as needed
+)
 
 
+plot.tempanom.box <- ggplot(phyto.df) +
+  geom_boxplot(aes(x = Blob.status, y = SURF_TEMP_ANOM), fill = my.colorblind.colors[4]) +
+  # scale_fill_manual(values = my.colors.blob.2022) +
+  labs(x = "Time Period", y = "Surface Water \n Temperature \n Anomaly (C)") +
+  guides(fill = "none") +
+  # geom_text(
+  #   data = label_df,
+  #   aes(x = Blob.status, y = (y_pos*2), label = Letter),
+  #   inherit.aes = FALSE) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
 
-# ---- measure volatility ----
+ggplot(phyto.df) +
+  geom_line(aes(x = Date, y = SURF_TEMP_ANOM)) +
+  geom_smooth(aes(x = Date, y = SURF_TEMP_ANOM), method = "loess") +
+  labs(x = "Date", y = "Surface Water Temperature Anomaly (C)") +
+  theme_bw() +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") 
+
+
+## phytoplankton total counts ##
+
+phyto.df$sum.phyto.counts <- rowSums(phyto.df[,which(colnames(phyto.df) %in% predictors)])
+
+my.aov <- aov(log10(phyto.df$sum.phyto.counts)~phyto.df$Blob.status)
+
+my.tukey <- TukeyHSD(my.aov)
+
+my.tukey.results <- my.tukey$`phyto.df$Blob.status`
+
+my.df <- as.data.frame(my.tukey.results[which(my.tukey.results[,4] < 0.05), 4])
+my.df$period.comparison <- rownames(my.df)
+
+library(multcompView)
+
+my.letters <- multcompLetters4(my.aov, my.tukey)[[1]]$Letters
+
+y_max <- tapply(log10(phyto.df$sum.phyto.counts), phyto.df$Blob.status, max, na.rm = TRUE)
+
+label_df <- data.frame(
+  Blob.status = names(my.letters),
+  Letter = my.letters,
+  y_pos = y_max[names(my.letters)] + 0.2  # adjust spacing as needed
+)
+
+
+plot.phytocount.box <- ggplot(phyto.df) +
+  geom_boxplot(aes(x = Blob.status, y = log10(sum.phyto.counts)), fill = my.colorblind.colors[5]) +
+  scale_fill_manual(values = my.colors.blob.2022) +
+  labs(x = "Time Period", y = "log10 Total \n Phytoplankton \n Count") +
+  guides(fill = "none") +
+  # geom_text(
+  #   data = label_df,
+  #   aes(x = Blob.status, y = (y_pos), label = Letter),
+  #   inherit.aes = FALSE) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+ggplot(phyto.df) +
+  geom_line(aes(x = Date, y = log10(sum.phyto.counts))) +
+  geom_smooth(aes(x = Date, y = log10(sum.phyto.counts)), method = "loess") +
+  labs(x = "Date", y = "log10(Total Phytoplankton) (Counts)") +
+  theme_bw() +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") 
+
 
 sccoos <- read.csv("https://erddap.sccoos.org/erddap/tabledap/HABs-ScrippsPier.csv?time%2CChl_Volume_Filtered%2CChl1%2CChl2%2CAvg_Chloro%2CPhosphate%2CSilicate%2CNitrite%2CNitrite_Nitrate%2CAmmonium%2CNitrate%2CVolume_Settled_for_Counting&time%3E=2008-06-30T15%3A00%3A00Z&time%3C=2026-04-06T18%3A16%3A00Z")
 
@@ -1510,11 +1682,206 @@ sccoos <- sccoos %>% group_by(Date) %>% summarize_all(mean)
 phyto.df <- merge(phyto.df, sccoos, by = "Date", all.x = T, all.y = F)
 
 
-sccoos.FCM <- readRDS("../SCCOOS_microbial_time_series/R_Data/2026-03-17_sccoos_com_df_fcm_cleaned_rarefied_2000.rds")
-sccoos.FCM <- sccoos.FCM[,which(colnames(sccoos.FCM) %in% c("Date", "total_ml_vol_corrected_AF", "total_ml_vol_corrected_SG"))]
-phyto.df <- merge(phyto.df, sccoos.FCM, by = "Date", all.x = T, all.y = F)
+## chlorophyll ##
 
-phyto.df <- merge(phyto.df, combo.full[which(colnames(combo.full) %in% c("Date", "O2bio.estimated"))], all.x = T, all.y = F)
+
+my.aov <- aov(log10(phyto.df$Avg_Chloro)~phyto.df$Blob.status)
+
+my.tukey <- TukeyHSD(my.aov)
+
+my.tukey.results <- my.tukey$`phyto.df$Blob.status`
+
+my.df <- as.data.frame(my.tukey.results[which(my.tukey.results[,4] < 0.05), 4])
+my.df$period.comparison <- rownames(my.df)
+
+library(multcompView)
+
+my.letters <- multcompLetters4(my.aov, my.tukey)[[1]]$Letters
+
+y_max <- tapply(log10(phyto.df$Avg_Chloro), phyto.df$Blob.status, max, na.rm = TRUE)
+
+label_df <- data.frame(
+  Blob.status = names(my.letters),
+  Letter = my.letters,
+  y_pos = y_max[names(my.letters)] + 0.2  # adjust spacing as needed
+)
+
+
+plot.chla.box <- ggplot(phyto.df) +
+  geom_boxplot(aes(x = Blob.status, y = log10(Avg_Chloro)), fill = my.colorblind.colors[3]) +
+  scale_fill_manual(values = my.colors.blob.2022) +
+  labs(x = "Time Period", y = "log10 \n Chlorophyll \n (ug/L)") +
+  guides(fill = "none") +
+  # geom_text(
+  #   data = label_df,
+  #   aes(x = Blob.status, y = (y_pos), label = Letter),
+  #   inherit.aes = FALSE) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+ggplot(phyto.df) +
+  geom_line(aes(x = Date, y = log10(Avg_Chloro))) +
+  geom_smooth(aes(x = Date, y = log10(Avg_Chloro)), method = "loess") +
+  labs(x = "Date", y = "log10(Chlorophyll) (ug/L)") +
+  theme_bw() +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") 
+
+
+## nitrate ##
+
+my.aov <- aov(phyto.df$Nitrate~phyto.df$Blob.status)
+
+my.tukey <- TukeyHSD(my.aov)
+
+my.tukey.results <- my.tukey$`phyto.df$Blob.status`
+
+my.df <- as.data.frame(my.tukey.results[which(my.tukey.results[,4] < 0.05), 4])
+my.df$period.comparison <- rownames(my.df)
+
+library(multcompView)
+
+my.letters <- multcompLetters4(my.aov, my.tukey)[[1]]$Letters
+
+y_max <- tapply(phyto.df$Nitrate, phyto.df$Blob.status, max, na.rm = TRUE)
+
+label_df <- data.frame(
+  Blob.status = names(my.letters),
+  Letter = my.letters,
+  y_pos = y_max[names(my.letters)] + 0.2  # adjust spacing as needed
+)
+
+
+plot.nitrate.box <- ggplot(phyto.df) +
+  geom_boxplot(aes(x = Blob.status, y = Nitrate), fill = "white") +
+  scale_fill_manual(values = my.colors.blob.2022) +
+  labs(x = "Time Period", y = "Nitrate (uM)") +
+  guides(fill = "none") +
+  # geom_text(
+  #   data = label_df,
+  #   aes(x = Blob.status, y = (y_pos), label = Letter),
+  #   inherit.aes = FALSE) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+ggplot(phyto.df) +
+  geom_line(aes(x = Date, y = Nitrate)) +
+  geom_smooth(aes(x = Date, y = Nitrate), method = "loess") +
+  labs(x = "Date", y = "Nitrate (uM)") +
+  theme_bw() +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") 
+
+
+## phosphate ##
+
+my.aov <- aov(phyto.df$Phosphate~phyto.df$Blob.status)
+
+my.tukey <- TukeyHSD(my.aov)
+
+my.tukey.results <- my.tukey$`phyto.df$Blob.status`
+
+my.df <- as.data.frame(my.tukey.results[which(my.tukey.results[,4] < 0.05), 4])
+my.df$period.comparison <- rownames(my.df)
+
+library(multcompView)
+
+my.letters <- multcompLetters4(my.aov, my.tukey)[[1]]$Letters
+
+y_max <- tapply(phyto.df$Phosphate, phyto.df$Blob.status, max, na.rm = TRUE)
+
+label_df <- data.frame(
+  Blob.status = names(my.letters),
+  Letter = my.letters,
+  y_pos = y_max[names(my.letters)] + 0.2  # adjust spacing as needed
+)
+
+
+plot.phosphate.box <- ggplot(phyto.df) +
+  geom_boxplot(aes(x = Blob.status, y = Phosphate), fill = "white") +
+  scale_fill_manual(values = my.colors.blob.2022) +
+  labs(x = "Time Period", y = "Phosphate (uM)") +
+  guides(fill = "none") +
+  # geom_text(
+  #   data = label_df,
+  #   aes(x = Blob.status, y = (y_pos), label = Letter),
+  #   inherit.aes = FALSE) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+ggplot(phyto.df) +
+  geom_line(aes(x = Date, y = Phosphate)) +
+  geom_smooth(aes(x = Date, y = Phosphate), method = "loess") +
+  labs(x = "Date", y = "Phosphate (uM)") +
+  theme_bw() +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") 
+
+
+## silicate ##
+
+my.aov <- aov(phyto.df$Silicate~phyto.df$Blob.status)
+
+my.tukey <- TukeyHSD(my.aov)
+
+my.tukey.results <- my.tukey$`phyto.df$Blob.status`
+
+my.df <- as.data.frame(my.tukey.results[which(my.tukey.results[,4] < 0.05), 4])
+my.df$period.comparison <- rownames(my.df)
+
+library(multcompView)
+
+my.letters <- multcompLetters4(my.aov, my.tukey)[[1]]$Letters
+
+y_max <- tapply(phyto.df$Avg_Chloro, phyto.df$Blob.status, max, na.rm = TRUE)
+
+label_df <- data.frame(
+  Blob.status = names(my.letters),
+  Letter = my.letters,
+  y_pos = y_max[names(my.letters)] + 0.2  # adjust spacing as needed
+)
+
+
+plot.silicate.box <- ggplot(phyto.df) +
+  geom_boxplot(aes(x = Blob.status, y = Silicate), fill = "white") +
+  scale_fill_manual(values = my.colors.blob.2022) +
+  labs(x = "Time Period", y = "Silicate (uM)") +
+  guides(fill = "none") +
+  # geom_text(
+  #   data = label_df,
+  #   aes(x = Blob.status, y = (y_pos), label = Letter),
+  #   inherit.aes = FALSE) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+ggplot(phyto.df) +
+  geom_line(aes(x = Date, y = Silicate)) +
+  geom_smooth(aes(x = Date, y = Silicate), method = "loess") +
+  labs(x = "Date", y = "Silicate (uM)") +
+  theme_bw() +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") 
+
+
+
+## comparisons
+
+ggplot(phyto.df) +
+  geom_point(aes(x = SURF_TEMP_ANOM, y = log10(Avg_Chloro))) +
+  geom_smooth(aes(x = SURF_TEMP_ANOM, y = log10(Avg_Chloro)), method = "lm") +
+  labs(x = "Surface Water Temperature Anomaly (C)", y = "log10(Chlorophyll) (ug/L)") +
+  theme_bw()
+summary(lm(log10(phyto.df$Avg_Chloro)~phyto.df$SURF_TEMP_ANOM))
+
+
+
+
+
+# ---- measure volatility ----
+
+
+
+# sccoos.FCM <- readRDS("../SCCOOS_microbial_time_series/R_Data/2026-03-17_sccoos_com_df_fcm_cleaned_rarefied_2000.rds")
+# sccoos.FCM <- sccoos.FCM[,which(colnames(sccoos.FCM) %in% c("Date", "total_ml_vol_corrected_AF", "total_ml_vol_corrected_SG"))]
+# phyto.df <- merge(phyto.df, sccoos.FCM, by = "Date", all.x = T, all.y = F)
+
+# phyto.df <- merge(phyto.df, combo.full[which(colnames(combo.full) %in% c("Date", "O2bio.estimated"))], all.x = T, all.y = F)
 
 phyto.df$sum.phyto.counts <- rowSums(phyto.df[,which(colnames(phyto.df) %in% predictors)])
 
@@ -1524,9 +1891,17 @@ phyto.df$volatility.O2bio.predicted.altered <- NA
 phyto.df$volatility.chlorophyll <- NA
 phyto.df$volatility.fcm.AF <- NA
 phyto.df$volatility.log10chlorophyll <- NA
-phyto.df$volatility.O2bio.estimated <- NA
 phyto.df$volatility.sum.count <- NA
 phyto.df$volatility.log10.sum.count <- NA
+phyto.df$volatility.temperature <- NA
+phyto.df$volatility.temperature.anomaly <- NA
+phyto.df$volatility.richness <- NA
+phyto.df$volatility.shannon.div <- NA
+phyto.df$volatility.nitrate <- NA
+phyto.df$volatility.phosphate <- NA
+phyto.df$volatility.silicate <- NA
+
+
 
 for(d in 1:nrow(phyto.df)){
   
@@ -1538,28 +1913,88 @@ for(d in 1:nrow(phyto.df)){
   phyto.df$volatility.chlorophyll[d] <- sd(my.df$Avg_Chloro, na.rm = T)
   phyto.df$volatility.log10chlorophyll[d] <- sd(log10(my.df$Avg_Chloro), na.rm = T)
   phyto.df$volatility.fcm.AF[d] <- sd(my.df$total_ml_vol_corrected_AF, na.rm = T)
-  phyto.df$volatility.O2bio.estimated[d] <- sd(my.df$O2bio.estimated, na.rm = T)
+  # phyto.df$volatility.O2bio.estimated[d] <- sd(my.df$O2bio.estimated, na.rm = T)
   phyto.df$volatility.sum.count[d] <- sd(my.df$sum.phyto.count, na.rm = T)
   phyto.df$volatility.log10.sum.count[d] <- sd(log10(my.df$sum.phyto.counts), na.rm = T)
+  phyto.df$volatility.temperature[d] <- sd(my.df$SURF_TEMP_C, na.rm = T)
+  phyto.df$volatility.temperature.anomaly[d] <- sd(my.df$SURF_TEMP_ANOM, na.rm = T)
+  phyto.df$volatility.richness[d] <- sd(my.df$richness, na.rm = T)
+  phyto.df$volatility.shannon.div[d] <- sd(my.df$shannon.div, na.rm = T)
+  phyto.df$volatility.nitrate[d] <- sd(my.df$Nitrate, na.rm = T)
+  phyto.df$volatility.phosphate[d] <- sd(my.df$Phosphate, na.rm = T)
+  phyto.df$volatility.silicate[d] <- sd(my.df$Silicate, na.rm = T)
+  
   
   
 }
 
-plot.vol.O2bio.predalt <- ggplot(data = phyto.df) +
-  geom_line(aes(x = Date, y = volatility.O2bio.predicted.altered)) +
-  theme_bw()
+phyto.df.o2biodates$volatility.O2bio.estimated <- NA
 
-plot.vol.O2bio.est <- ggplot(data = phyto.df) +
-  geom_line(aes(x = Date, y = volatility.O2bio.estimated)) +
-  theme_bw()
+for(d in 1:nrow(phyto.df.o2biodates)){
+  
+  my.date <- phyto.df.o2biodates$Date[d]
+  
+  my.df <- phyto.df.o2biodates[which(phyto.df.o2biodates$Date >= (my.date - 60*60*24*15) & phyto.df.o2biodates$Date <= (my.date + 60*60*24*15)),]
+  
+  phyto.df.o2biodates$volatility.O2bio.estimated[d] <- sd(my.df$O2bio.estimated, na.rm = T)
+  
+}
+
+
+
+
+# plot.vol.O2bio.predalt <- ggplot(data = phyto.df) +
+#   geom_line(aes(x = Date, y = volatility.O2bio.predicted.altered)) +
+#   labs(y = "Predicted [O2]bio Volatility (uM)") +
+#   theme_bw()
+
+plot.vol.O2bio.est <- ggplot(data = phyto.df.o2biodates) +
+  geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_line(aes(x = Date, y = volatility.O2bio.estimated), color = "black", lwd = 1) +
+  labs(y = "[O2]bio \n Volatility (uM)") +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+plot.vol.O2bio.est.box <- ggplot(phyto.df.o2biodates) +
+  geom_boxplot(aes(x = Blob.status, y = volatility.O2bio.estimated), fill = "black") +
+  scale_fill_manual(values = my.colors.blob.2022) +
+  labs(x = "Time Period", y = "[O2]bio \n Volatility (uM)") +
+  guides(fill = "none") +
+  # geom_text(
+  #   data = label_df,
+  #   aes(x = Blob.status, y = (y_pos), label = Letter),
+  #   inherit.aes = FALSE) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 1))
 
 # plot.vol.chlorophyll <- ggplot(data = phyto.df) +
 #   geom_line(aes(x = Date, y = volatility.chlorophyll)) +
 #   theme_bw()
 
 plot.vol.log10chlorophyll <- ggplot(data = phyto.df) +
-  geom_line(aes(x = Date, y = volatility.log10chlorophyll)) +
-  theme_bw()
+  geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_line(aes(x = Date, y = volatility.log10chlorophyll), color = my.colorblind.colors[3], lwd = 1) +
+  labs(y = "log10 \n Chlorophyll \n Volatility (ug/L)") +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+plot.vol.chla.box <- ggplot(phyto.df) +
+  geom_boxplot(aes(x = Blob.status, y = volatility.log10chlorophyll), fill = my.colorblind.colors[3]) +
+  scale_fill_manual(values = my.colors.blob.2022) +
+  labs(x = "Time Period", y = "log10 \n Chlorophyll \n Volatility (ug/L)") +
+  guides(fill = "none") +
+  # geom_text(
+  #   data = label_df,
+  #   aes(x = Blob.status, y = (y_pos), label = Letter),
+  #   inherit.aes = FALSE) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 1))
 
 # plot.vol.FCM <- ggplot(data = phyto.df) +
 #   geom_line(aes(x = Date, y = volatility.fcm.AF)) +
@@ -1570,10 +2005,305 @@ plot.vol.log10chlorophyll <- ggplot(data = phyto.df) +
 #   theme_bw()
 
 plot.vol.log10.sum.counts <- ggplot(data = phyto.df) +
-  geom_line(aes(x = Date, y = volatility.log10.sum.count)) +
-  theme_bw()
+  geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_line(aes(x = Date, y = volatility.log10.sum.count), color = my.colorblind.colors[5], lwd = 1) +
+  labs(y = "log10 Total \n Phytoplankton Count \n Volatility") +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
 
-plot.vol.O2bio.est + plot.vol.log10chlorophyll + plot.vol.log10.sum.counts + plot_layout(ncol = 1)
+plot.vol.log10.sum.counts.box <- ggplot(phyto.df) +
+  geom_boxplot(aes(x = Blob.status, y = volatility.log10.sum.count), fill = my.colorblind.colors[5]) +
+  scale_fill_manual(values = my.colors.blob.2022) +
+  labs(x = "Time Period", y = "log10 Total \n Phytoplankton Count \n Volatility") +
+  guides(fill = "none") +
+  # geom_text(
+  #   data = label_df,
+  #   aes(x = Blob.status, y = (y_pos), label = Letter),
+  #   inherit.aes = FALSE) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 1))
+
+plot.vol.temp <- ggplot(data = phyto.df) +
+  geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_line(aes(x = Date, y = volatility.temperature), color = my.colorblind.colors[2], lwd = 1) +
+  labs(y = "Surface Water \n Temperature \n Volatility (C)") +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+plot.vol.temp.box <- ggplot(phyto.df) +
+  geom_boxplot(aes(x = Blob.status, y = volatility.temperature), fill = my.colorblind.colors[2]) +
+  scale_fill_manual(values = my.colors.blob.2022) +
+  labs(x = "Time Period", y = "Surface Water \n Temperature \n Volatility (C)") +
+  guides(fill = "none") +
+  # geom_text(
+  #   data = label_df,
+  #   aes(x = Blob.status, y = (y_pos), label = Letter),
+  #   inherit.aes = FALSE) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 1))
+
+plot.vol.temp.anomaly <- ggplot(data = phyto.df) +
+  geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_line(aes(x = Date, y = volatility.temperature.anomaly), color = my.colorblind.colors[4], lwd = 1) +
+  labs(y = "Surface Water \n Temperature Anomaly \n Volatility (C)") +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+plot.vol.temp.anomaly.box <- ggplot(phyto.df) +
+  geom_boxplot(aes(x = Blob.status, y = volatility.temperature.anomaly), fill = my.colorblind.colors[4]) +
+  scale_fill_manual(values = my.colors.blob.2022) +
+  labs(x = "Time Period", y = "Surface Water \n Temperature Anomaly \n Volatility (C)") +
+  guides(fill = "none") +
+  # geom_text(
+  #   data = label_df,
+  #   aes(x = Blob.status, y = (y_pos), label = Letter),
+  #   inherit.aes = FALSE) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 1))
+
+plot.vol.richness <- ggplot(data = phyto.df) +
+  geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_line(aes(x = Date, y = volatility.richness), color = my.colorblind.colors[6], lwd = 1) +
+  labs(y = "Phytoplankton \n Richness \n Volatility") +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+plot.vol.richness.box <- ggplot(phyto.df) +
+  geom_boxplot(aes(x = Blob.status, y = volatility.richness), fill = my.colorblind.colors[6]) +
+  scale_fill_manual(values = my.colors.blob.2022) +
+  labs(x = "Time Period", y = "Phytoplankton \n Richness \n Volatility") +
+  guides(fill = "none") +
+  # geom_text(
+  #   data = label_df,
+  #   aes(x = Blob.status, y = (y_pos), label = Letter),
+  #   inherit.aes = FALSE) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 1))
+
+plot.vol.shannondiv <- ggplot(data = phyto.df) +
+  geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_line(aes(x = Date, y = volatility.shannon.div), color = my.colorblind.colors[1], lwd = 1) +
+  labs(y = "Phytoplankton \n Diversity \n Volatility") +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+plot.vol.shannondiv.box <- ggplot(phyto.df) +
+  geom_boxplot(aes(x = Blob.status, y = volatility.shannon.div), fill = my.colorblind.colors[1]) +
+  scale_fill_manual(values = my.colors.blob.2022) +
+  labs(x = "Time Period", y = "Phytoplankton \n Diversity \n Volatility") +
+  guides(fill = "none") +
+  # geom_text(
+  #   data = label_df,
+  #   aes(x = Blob.status, y = (y_pos), label = Letter),
+  #   inherit.aes = FALSE) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 1))
+
+plot.vol.nitrate <- ggplot(data = phyto.df) +
+  geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_line(aes(x = Date, y = volatility.nitrate), color = "grey69", lwd = 1) +
+  labs(y = "Nitrate \n Volatility (uM)") +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+plot.vol.nitrate.box <- ggplot(phyto.df) +
+  geom_boxplot(aes(x = Blob.status, y = volatility.nitrate), fill = "white") +
+  scale_fill_manual(values = my.colors.blob.2022) +
+  labs(x = "Time Period", y = "Nitrate \n Volatility (uM)") +
+  guides(fill = "none") +
+  # geom_text(
+  #   data = label_df,
+  #   aes(x = Blob.status, y = (y_pos), label = Letter),
+  #   inherit.aes = FALSE) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 1))
+
+plot.vol.phosphate <- ggplot(data = phyto.df) +
+  geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_line(aes(x = Date, y = volatility.phosphate), color = "grey69", lwd = 1) +
+  labs(y = "Phosphate \n Volatility (uM)") +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+plot.vol.phosphate.box <- ggplot(phyto.df) +
+  geom_boxplot(aes(x = Blob.status, y = volatility.phosphate), fill = "white") +
+  scale_fill_manual(values = my.colors.blob.2022) +
+  labs(x = "Time Period", y = "Phosphate \n Volatility (uM)") +
+  guides(fill = "none") +
+  # geom_text(
+  #   data = label_df,
+  #   aes(x = Blob.status, y = (y_pos), label = Letter),
+  #   inherit.aes = FALSE) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 1))
+
+plot.vol.silicate <- ggplot(data = phyto.df) +
+  geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_line(aes(x = Date, y = volatility.silicate), color = "grey69", lwd = 1) +
+  labs(y = "Silicate \n Volatility (uM)") +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+plot.vol.silicate.box <- ggplot(phyto.df) +
+  geom_boxplot(aes(x = Blob.status, y = volatility.silicate), fill = "white") +
+  scale_fill_manual(values = my.colors.blob.2022) +
+  labs(x = "Time Period", y = "Silicate \n Volatility (uM)") +
+  guides(fill = "none") +
+  # geom_text(
+  #   data = label_df,
+  #   aes(x = Blob.status, y = (y_pos), label = Letter),
+  #   inherit.aes = FALSE) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 1))
+
+# plot.vol.O2bio.est + plot.vol.log10.sum.counts + plot.vol.log10chlorophyll +plot.vol.temp.anomaly + plot.vol.temp + plot.vol.richness + plot.vol.shannondiv + plot_layout(ncol = 1)
+
+
+
+plot.temp <- ggplot(data = phyto.df) +
+  geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_line(aes(x = Date, y = SURF_TEMP_C), color = my.colorblind.colors[2], lwd = 1) +
+  labs(y = "Surface Water \n Temperature (C)") +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+plot.temp.anomaly <- ggplot(data = phyto.df) +
+  geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_line(aes(x = Date, y = SURF_TEMP_ANOM), color = my.colorblind.colors[4], lwd = 1) +
+  labs(y = "Surface Water \n Temperature \n Anomaly (C)") +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+plot.log10chlorophyll <- ggplot(data = phyto.df) +
+  geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_line(aes(x = Date, y = log10(Avg_Chloro)), color = my.colorblind.colors[3], lwd = 1) +
+  labs(y = "log10 \n Chlorophyll \n (ug/L)") +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+plot.log10.sum.counts <- ggplot(data = phyto.df) +
+  geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_line(aes(x = Date, y = log10(sum.phyto.counts)), color = my.colorblind.colors[5], lwd = 1) +
+  labs(y = "log10 Total \n Phytoplankton \n Count") +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+plot.O2bio.est <- ggplot(data = phyto.df.o2biodates) +
+  geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_line(aes(x = Date, y = O2bio.estimated), color = "black", lwd = 1) +
+  labs(y = "[O2]bio (uM)") +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+plot.richness <- ggplot(data = phyto.df) +
+  geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_line(aes(x = Date, y = richness), color = my.colorblind.colors[6], lwd = 1) +
+  labs(y = "Phytoplankton \n Richness") +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+plot.shannondiv <- ggplot(data = phyto.df) +
+  geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_line(aes(x = Date, y = shannon.div), color = my.colorblind.colors[1], lwd = 1) +
+  labs(y = "Phytoplankton \n Diversity") +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+plot.nitrate <- ggplot(data = phyto.df) +
+  geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_line(aes(x = Date, y = Nitrate), color = "grey69", lwd = 1) +
+  labs(y = "Nitrate (uM)") +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+plot.phosphate <- ggplot(data = phyto.df) +
+  geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_line(aes(x = Date, y = Phosphate), color = "grey69", lwd = 1) +
+  labs(y = "Phosphate (uM)") +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+plot.silicate <- ggplot(data = phyto.df) +
+  geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_line(aes(x = Date, y = Silicate), color = "grey69", lwd = 1) +
+  labs(y = "Silicate (uM)") +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) 
+
+# plot.O2bio.est + plot.log10.sum.counts + plot.log10chlorophyll + plot.temp.anomaly + plot.temp + plot.richness + plot.shannondiv + plot_layout(ncol = 1)
+
+
+## BIG PLOT!! 
+big.ole.plot <- plot.o2bio.box + plot.O2bio.est + plot.vol.O2bio.est + plot.vol.O2bio.est.box + 
+  plot.richness.box + plot.richness +  plot.vol.richness + plot.vol.richness.box +
+  plot.shannon.div.box + plot.shannondiv + plot.vol.shannondiv + plot.vol.shannondiv.box +
+  plot.phytocount.box + plot.log10.sum.counts + plot.vol.log10.sum.counts + plot.vol.log10.sum.counts.box + 
+  plot.chla.box + plot.log10chlorophyll + plot.vol.log10chlorophyll + plot.vol.chla.box + 
+  plot.tempanom.box + plot.temp.anomaly + plot.vol.temp.anomaly + plot.vol.temp.anomaly.box + 
+  plot.temp.box + plot.temp + plot.vol.temp + plot.vol.temp.box + 
+  plot.nitrate.box + plot.nitrate + plot.vol.nitrate + plot.vol.nitrate.box +
+  plot.phosphate.box + plot.phosphate + plot.vol.phosphate + plot.vol.phosphate.box +
+  plot.silicate.box + plot.silicate + plot.vol.silicate + plot.vol.silicate.box +
+  plot_layout(ncol = 4, axes = "collect", widths = c(1,3,3,1))
+
+ggsave("Figures/2026-04-19_big_ole_plot.pdf", width = 20, height = 15, units = "in")
+
+
+
 
 
 summary(lm(phyto.df$volatility.log10chlorophyll~phyto.df$volatility.log10.sum.count))
@@ -1860,7 +2590,9 @@ ggplot(data = phyto.df) +
   theme_bw()
 
 
-# ---- taxa variability between time periods ----# ---- tSURF_TEMP_Caxa variability between time periods ----
+# ---- taxa variability between time periods ----
+
+# ---- taxa variability between time periods ----
 
 phytos.combo$Blob.status[which(phytos.combo$Year >= 2022)] <- "Post2022Shift"
 phytos.combo$Blob.status <- factor(phytos.combo$Blob.status, levels = c("PreBlob", "Blob", "PostBlob", "Post2022Shift"))
