@@ -15,9 +15,9 @@ library(DESeq2)
 library(akima)
 
 
-setwd("C://Users/haler/Documents/PhD-Bowman/Microscopy_time_series/")
+setwd("C://Users/haler/Documents/PhD-Bowman/Microscopy_time_series")
 
-combo.full <- readRDS("2026-02-09_microscopy_o2bio_combo_full.rds")
+combo.full <- readRDS("R_Data/2026-02-09_microscopy_o2bio_combo_full.rds")
 
 enso.soi <- readRDS("R_Data/2026-02-09_enso_SOI.rds")
 enso.sst <- readRDS("R_Data/2026-02-09_enso_SST.rds")
@@ -297,6 +297,11 @@ for(i in 1:100){
 sio.temp.baseline.bootstrap.long <- sio.temp.baseline.bootstrap %>% pivot_longer(cols = colnames(sio.temp.baseline.bootstrap[-1]), names_to = "iteration", values_to = "boot.base.temp")
 sio.temp.baseline.bootstrap.summary <- sio.temp.baseline.bootstrap.long %>% group_by(cal.date) %>% dplyr::summarize(boot.base.temp = mean(boot.base.temp, na.rm = T))
 
+
+saveRDS(sio.temp.baseline.bootstrap.summary, "2026-04-26_sio_temp_baseline_bootstrap_summary.rds")
+
+sio.temp.baseline.bootstrap.summary <- readRDS("2026-04-26_sio_temp_baseline_bootstrap_summary.rds")
+
 # 
 # for(d in 1:length(unique.cal.dates)){
 #   
@@ -482,15 +487,93 @@ t.test(x = combo.sio.temp$O2bio.predicted.altered.interp[which(combo.sio.temp$co
 
 h+c
 
-p <- ggplot(data = combo.sio.temp) +
-  geom_line(aes(x = Date, y = O2bio.predicted.altered.interp), alpha = 0.4) +
-  geom_point(data = combo.sio.temp[which(combo.sio.temp$heatwave.perc.90 == "yes"),], aes(x = Date, y = O2bio.predicted.altered.interp), color = "red") +
-  geom_point(data = combo.sio.temp[which(combo.sio.temp$coldwave.perc.90 == "yes"),], aes(x = Date, y = O2bio.predicted.altered.interp), color = "blue") +
-  theme_bw()
-ggplotly(p)
+# p <- ggplot(data = combo.sio.temp) +
+#   geom_line(aes(x = Date, y = O2bio.predicted.altered.interp), alpha = 0.4) +
+#   geom_point(data = combo.sio.temp[which(combo.sio.temp$heatwave.perc.90 == "yes"),], aes(x = Date, y = O2bio.predicted.altered.interp), color = "red") +
+#   geom_point(data = combo.sio.temp[which(combo.sio.temp$coldwave.perc.90 == "yes"),], aes(x = Date, y = O2bio.predicted.altered.interp), color = "blue") +
+#   theme_bw()
+# ggplotly(p)
 
 
 saveRDS(combo.sio.temp, file = "2026-04-14_combo_sio_temp.rds")
+
+
+# ---- describe blob duration and characteristics more objectively ----
+
+
+heatwave.durations <- rle(combo.sio.temp$heatwave.perc.90)
+
+my.ends <- cumsum(heatwave.durations$lengths)
+my.starts <- my.ends - heatwave.durations$lengths + 1
+
+yes_runs <- which(heatwave.durations$values == "yes")
+no_runs <- which(heatwave.durations$values == "no")
+
+yes.result <- data.frame(
+  start_date = combo.sio.temp$Date[my.starts[yes_runs]],
+  end_date   = combo.sio.temp$Date[my.ends[yes_runs]],
+  length     = heatwave.durations$lengths[yes_runs]
+)
+
+no.result <- data.frame(
+  start_date = combo.sio.temp$Date[my.starts[no_runs]],
+  end_date   = combo.sio.temp$Date[my.ends[no_runs]],
+  length     = heatwave.durations$lengths[no_runs]
+)
+
+yes.result <- yes.result[which(year(yes.result$start_date) >= 2011),]
+no.result <- no.result[which(year(no.result$end_date) >= 2011),]
+
+
+ggplot(data = yes.result) +
+  geom_rect(aes(xmin = start_date, xmax = end_date, ymin = -Inf, ymax = Inf), fill = "red", alpha = 0.5) +
+  geom_line(aes(x = start_date, y = length)) +
+  theme_bw() +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y")
+
+
+ggplot(data = no.result) +
+  geom_rect(aes(xmin = start_date, xmax = end_date, ymin = -Inf, ymax = Inf), fill = "grey", alpha = 0.5) +
+  geom_line(aes(x = start_date, y = length)) +
+  theme_bw() +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y")
+
+
+colnames(yes.result)[1] <- "combo.date"
+colnames(no.result)[2] <- "combo.date"
+no.result$combo.date <- no.result$combo.date + 60*60*24
+
+try.it <- merge(x = yes.result, y = no.result, by = "combo.date")
+
+ggplot(data = try.it) +
+  geom_point(aes(x = length.x, y = length.y, color = factor(year(combo.date)))) +
+  scale_color_manual(values = rainbow(11)) +
+  theme_bw()
+
+
+my.dates <- seq(parse_date_time("2011-01-01", orders = "Ymd"), max(combo.sio.temp$Date), by = (60*60*24))
+mean.hw <- NA
+
+for(d in 1:length(my.dates)){
+  
+  my.df <- combo.sio.temp[which(combo.sio.temp$Date >= (my.dates[d]-15*60*60*24) & combo.sio.temp$Date <= (my.dates[d]+15*60*60*24)),]
+  
+  mean.hw <- c(mean.hw, length(which(my.df$heatwave.perc.90 == "yes"))/nrow(my.df))
+  
+}
+
+my.heatwave.df <- data.frame(my.dates, mean.hw[-1])
+
+ggplot(data = my.heatwave.df) +
+  geom_line(aes(x = my.dates, y = mean.hw..1.)) +
+  theme_bw() +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y")
+
+
+
+
+
+
 
 
 # ---- investigate correlation between o2bio change/slope and water temp (NONE) ----

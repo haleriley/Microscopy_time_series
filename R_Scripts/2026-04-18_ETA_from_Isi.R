@@ -500,9 +500,9 @@ trajectoryPCoA(subsetTrajectories(x_scripps, site_selection = c("2019")),
 trajectoryPCoA(subsetTrajectories(x_scripps, site_selection = c("2020")), 
                traj.colors = rainbow(n = 14)[10], lwd = 3,
                survey.labels = T)
-trajectoryPCoA(subsetTrajectories(x_scripps, site_selection = c("2021")), 
-               traj.colors = rainbow(n = 14)[11], lwd = 3,
-               survey.labels = T)
+# trajectoryPCoA(subsetTrajectories(x_scripps, site_selection = c("2021")), 
+#                traj.colors = rainbow(n = 14)[11], lwd = 3,
+#                survey.labels = T)
 trajectoryPCoA(subsetTrajectories(x_scripps, site_selection = c("2022")), 
                traj.colors = rainbow(n = 14)[12], lwd = 3,
                survey.labels = T)
@@ -531,12 +531,21 @@ ScrippsConv <- trajectoryConvergence(x_scripps, type = "pairwise.symmetric")
 
 library(corrplot)
 
-corrplot(matrix(as.vector(ScrippsConv$tau)*as.numeric(ScrippsConv$p.value<0.05),13,13))
+# corrplot(matrix(as.vector(ScrippsConv$tau)*as.numeric(ScrippsConv$p.value<0.05),13,13))
+
+bright <- color("bright")
+my.colorblind.colors <- bright(7)
+my.year.colors <- c(rep(my.colorblind.colors[3], 3), rep(my.colorblind.colors[2],2), rep(my.colorblind.colors[4], 5), rep(my.colorblind.colors[6],3))
+
 
 # Open a pdf file
 pdf("Figures/ETA/ETA_convergence_scripps2018-2024.pdf", width = 10, height = 10) 
 # 2. Create a plot
-corrplot(matrix(as.vector(ScrippsConv$tau)*as.numeric(ScrippsConv$p.value<0.05),13,13))
+par(font = 2)
+corrplot(matrix(as.vector(ScrippsConv$tau)*as.numeric(ScrippsConv$p.value<0.05),13,13, 
+                dimnames = list(c(2011:2020,2022:2024), c(2011:2020,2022:2024))), 
+         is.corr = F, col = viridis(100), na.label = "-", tl.col = my.year.colors)
+
 dev.off()
 
 
@@ -548,10 +557,16 @@ scripps_D_traj_man_mat[scripps_D_traj_man_mat == 0] <- NA
 corrplot(scripps_D_traj_man_mat, is.corr = F, col = viridis(100))
 
 
-trajectoryConvergencePlot(x_scripps, type = "pairwise.symmetric")
 
 
+pdf("Figures/ETA/ETA_convergence_scrippsphyto2011-2024.pdf", width = 10, height = 10) 
+# 2. Create a plot
+par(font = 2)
+trajectoryConvergencePlot(x_scripps, type = "pairwise.symmetric", conv.color = viridis(2)[1], 
+                          div.color = viridis(2)[2], alpha.filter = 0.05, traj.names.colors = my.year.colors, traj.colors = "white")
 
+
+dev.off()
 
 
 
