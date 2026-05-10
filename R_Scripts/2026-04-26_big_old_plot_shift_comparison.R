@@ -82,10 +82,14 @@ phyto.mat.log10 <- phyto.mat.log10[which(rowSums(phyto.mat.log10) >= 200),]
 my.abund.taxa <- rownames(phyto.mat.log10)
 
 my.colCol <- rep(my.colorblind.colors[4], times = ncol(phyto.mat.log10))
-my.colCol[which(as.numeric(substr(colnames(phyto.mat.log10), start = 1, stop = 4)) <= 2013)] <- my.colorblind.colors[3]
-my.colCol[which(as.numeric(substr(colnames(phyto.mat.log10), start = 1, stop = 4)) %in% c(2014, 2015))] <- my.colorblind.colors[2]
-my.colCol[which(as.numeric(substr(colnames(phyto.mat.log10), start = 1, stop = 4)) >= 2022)] <- my.colorblind.colors[6]
+my.colCol[which(as.Date(colnames(phyto.mat.log10)) <= as.Date("2015-12-13"))] <- my.colorblind.colors[2]
+my.colCol[which(as.Date(colnames(phyto.mat.log10)) < as.Date("2014-09-19"))] <- my.colorblind.colors[3]
+# my.colCol[which(as.Date(colnames(phyto.mat.log10)) <= as.Date("2016-03-21"))] <- my.colorblind.colors[2]
+# my.colCol[which(as.Date(colnames(phyto.mat.log10)) < as.Date("2014-03-09"))] <- my.colorblind.colors[3]
+my.colCol[which(as.Date(colnames(phyto.mat.log10)) >= as.Date("2022-01-01"))] <- my.colorblind.colors[6]
 
+
+# phyto.mat.log10 <- phyto.mat.log10[,c(1:350)]
 
 heatmap.2(phyto.mat.log10,
           trace = 'none',
@@ -156,9 +160,9 @@ ggplot(phyto.df) +
 
 
 phyto.df$Blob.status <- "Blob"
-phyto.df$Blob.status[which(year(phyto.df$Date) <= 2013)] <- "PreBlob"
-phyto.df$Blob.status[which(year(phyto.df$Date) >= 2016)] <- "PostBlob"
-phyto.df$Blob.status[which(year(phyto.df$Date) >= 2022)] <- "Post2022Shift"
+phyto.df$Blob.status[which(phyto.df$Date < parse_date_time("2014-03-09", orders = "Ymd"))] <- "PreBlob"
+phyto.df$Blob.status[which(phyto.df$Date >= parse_date_time("2015-12-13", orders = "Ymd"))] <- "PostBlob"
+phyto.df$Blob.status[which(phyto.df$Date >= parse_date_time("2022-01-01", orders = "Ymd"))] <- "Post2022Shift"
 phyto.df$Blob.status <- factor(phyto.df$Blob.status, levels = c("PreBlob", "Blob", "PostBlob", "Post2022Shift"))
 
 
@@ -429,7 +433,7 @@ plot.tempanom.box <- ggplot(phyto.df) +
   # geom_text(
   #   data = label_df,
   #   aes(x = Blob.status, y = (y_pos*2), label = Letter),
-  #   inherit.aes = FALSE) +
+    # inherit.aes = FALSE) +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) +
   theme(axis.title = element_text(size = 14, face = "bold"), axis.text = element_text(size = 12), legend.title = element_text(size = 14, face = "bold"), legend.text = element_text(size = 12)) +
@@ -698,10 +702,10 @@ plot.silicate.box <- ggplot(phyto.df) +
   scale_fill_manual(values = my.colors.blob.2022) +
   labs(x = "Time Period", y = "Silicate (uM)") +
   guides(fill = "none") +
-  geom_text(
-    data = label_df,
-    aes(x = Blob.status, y = (y_pos), label = Letter),
-    inherit.aes = FALSE) +
+  # geom_text(
+  #   data = label_df,
+  #   aes(x = Blob.status, y = (y_pos), label = Letter),
+  #   inherit.aes = FALSE) +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) +
   theme(axis.title = element_text(size = 14, face = "bold"), axis.text = element_text(size = 12), legend.title = element_text(size = 14, face = "bold"), legend.text = element_text(size = 12)) +
@@ -752,10 +756,10 @@ plot.o2bio.predalt.box <- ggplot(phyto.df) +
   scale_fill_manual(values = my.colors.blob.2022) +
   labs(x = "Time Period", y = "Predicted \n [O2]bio (uM)") +
   guides(fill = "none") +
-  geom_text(
-    data = label_df,
-    aes(x = Blob.status, y = (y_pos), label = Letter),
-    inherit.aes = FALSE) +
+  # geom_text(
+  #   data = label_df,
+  #   aes(x = Blob.status, y = (y_pos), label = Letter),
+  #   inherit.aes = FALSE) +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) +
   theme(axis.title = element_text(size = 14, face = "bold"), axis.text = element_text(size = 12), legend.title = element_text(size = 14, face = "bold"), legend.text = element_text(size = 12)) +
@@ -889,8 +893,8 @@ for(d in 1:nrow(phyto.df.o2biodates)){
 
 plot.vol.O2bio.predalt <- ggplot(data = phyto.df) +
   geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_rect(aes(xmin=parse_date_time("2014-03-09", orders = "Ymd"), xmax = parse_date_time("2016-03-21", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-09-19", orders = "Ymd"), xmax = parse_date_time("2015-12-13", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
   geom_line(aes(x = Date, y = volatility.O2bio.predicted.altered), color = "black", lwd = 1) +
   labs(y = "Predicted \n [O2]bio \n Volatility (uM)") +
   scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
@@ -920,8 +924,8 @@ plot.vol.O2bio.predalt.box <- ggplot(phyto.df) +
 
 plot.vol.beuti <- ggplot(data = phyto.df) +
   geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_rect(aes(xmin=parse_date_time("2014-03-09", orders = "Ymd"), xmax = parse_date_time("2016-03-21", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-09-19", orders = "Ymd"), xmax = parse_date_time("2015-12-13", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
   geom_line(aes(x = Date, y = volatility.beuti), color = "grey30", lwd = 1) +
   labs(y = "BEUTI Index \n 33N Volatility \n (mmol/m/sec)") +
   scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
@@ -955,8 +959,8 @@ plot.vol.beuti.box <- ggplot(phyto.df) +
 
 plot.vol.log10chlorophyll <- ggplot(data = phyto.df) +
   geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_rect(aes(xmin=parse_date_time("2014-03-09", orders = "Ymd"), xmax = parse_date_time("2016-03-21", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-09-19", orders = "Ymd"), xmax = parse_date_time("2015-12-13", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
   geom_line(aes(x = Date, y = volatility.log10chlorophyll), color = my.colorblind.colors[3], lwd = 1) +
   labs(y = "log10 \n Chlorophyll \n Volatility (ug/L)") +
   scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
@@ -993,8 +997,8 @@ plot.vol.chla.box <- ggplot(phyto.df) +
 
 plot.vol.log10.sum.counts <- ggplot(data = phyto.df) +
   geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_rect(aes(xmin=parse_date_time("2014-03-09", orders = "Ymd"), xmax = parse_date_time("2016-03-21", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-09-19", orders = "Ymd"), xmax = parse_date_time("2015-12-13", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
   geom_line(aes(x = Date, y = volatility.log10.sum.count), color = my.colorblind.colors[5], lwd = 1) +
   labs(y = "log10 Total \n Phytoplankton Count \n Volatility") +
   scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
@@ -1023,8 +1027,8 @@ plot.vol.log10.sum.counts.box <- ggplot(phyto.df) +
 
 plot.vol.temp <- ggplot(data = phyto.df) +
   geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_rect(aes(xmin=parse_date_time("2014-03-09", orders = "Ymd"), xmax = parse_date_time("2016-03-21", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-09-19", orders = "Ymd"), xmax = parse_date_time("2015-12-13", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
   geom_line(aes(x = Date, y = volatility.temperature), color = my.colorblind.colors[2], lwd = 1) +
   labs(y = "Surface Water \n Temperature \n Volatility (C)") +
   scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
@@ -1053,8 +1057,8 @@ plot.vol.temp.box <- ggplot(phyto.df) +
 
 plot.vol.temp.anomaly <- ggplot(data = phyto.df) +
   geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_rect(aes(xmin=parse_date_time("2014-03-09", orders = "Ymd"), xmax = parse_date_time("2016-03-21", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-09-19", orders = "Ymd"), xmax = parse_date_time("2015-12-13", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
   geom_line(aes(x = Date, y = volatility.temperature.anomaly), color = my.colorblind.colors[4], lwd = 1) +
   labs(y = "Surface Water \n Temperature Anomaly \n Volatility (C)") +
   scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
@@ -1083,8 +1087,8 @@ plot.vol.temp.anomaly.box <- ggplot(phyto.df) +
 
 plot.vol.richness <- ggplot(data = phyto.df) +
   geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_rect(aes(xmin=parse_date_time("2014-03-09", orders = "Ymd"), xmax = parse_date_time("2016-03-21", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-09-19", orders = "Ymd"), xmax = parse_date_time("2015-12-13", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
   geom_line(aes(x = Date, y = volatility.richness), color = my.colorblind.colors[6], lwd = 1) +
   labs(y = "Phytoplankton \n Richness \n Volatility") +
   scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
@@ -1113,8 +1117,8 @@ plot.vol.richness.box <- ggplot(phyto.df) +
 
 plot.vol.shannondiv <- ggplot(data = phyto.df) +
   geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_rect(aes(xmin=parse_date_time("2014-03-09", orders = "Ymd"), xmax = parse_date_time("2016-03-21", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-09-19", orders = "Ymd"), xmax = parse_date_time("2015-12-13", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
   geom_line(aes(x = Date, y = volatility.shannon.div), color = my.colorblind.colors[1], lwd = 1) +
   labs(y = "Phytoplankton \n Diversity \n Volatility") +
   scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
@@ -1143,8 +1147,8 @@ plot.vol.shannondiv.box <- ggplot(phyto.df) +
 
 plot.vol.nitrate <- ggplot(data = phyto.df) +
   geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_rect(aes(xmin=parse_date_time("2014-03-09", orders = "Ymd"), xmax = parse_date_time("2016-03-21", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-09-19", orders = "Ymd"), xmax = parse_date_time("2015-12-13", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
   geom_line(aes(x = Date, y = volatility.nitrate), color = "grey69", lwd = 1) +
   labs(y = "Nitrate \n Volatility (uM)") +
   scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
@@ -1173,8 +1177,8 @@ plot.vol.nitrate.box <- ggplot(phyto.df) +
 
 plot.vol.phosphate <- ggplot(data = phyto.df) +
   geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_rect(aes(xmin=parse_date_time("2014-03-09", orders = "Ymd"), xmax = parse_date_time("2016-03-21", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-09-19", orders = "Ymd"), xmax = parse_date_time("2015-12-13", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
   geom_line(aes(x = Date, y = volatility.phosphate), color = "grey69", lwd = 1) +
   labs(y = "Phosphate \n Volatility (uM)") +
   scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
@@ -1203,8 +1207,8 @@ plot.vol.phosphate.box <- ggplot(phyto.df) +
 
 plot.vol.silicate <- ggplot(data = phyto.df) +
   geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_rect(aes(xmin=parse_date_time("2014-03-09", orders = "Ymd"), xmax = parse_date_time("2016-03-21", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-09-19", orders = "Ymd"), xmax = parse_date_time("2015-12-13", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
   geom_line(aes(x = Date, y = volatility.silicate), color = "grey69", lwd = 1) +
   labs(y = "Silicate \n Volatility (uM)") +
   scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
@@ -1237,8 +1241,8 @@ plot.vol.silicate.box <- ggplot(phyto.df) +
 
 plot.temp <- ggplot(data = phyto.df) +
   geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_rect(aes(xmin=parse_date_time("2014-03-09", orders = "Ymd"), xmax = parse_date_time("2016-03-21", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-09-19", orders = "Ymd"), xmax = parse_date_time("2015-12-13", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
   geom_line(aes(x = Date, y = SURF_TEMP_C), color = my.colorblind.colors[2], lwd = 1) +
   labs(y = "Surface Water \n Temperature (C)") +
   scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
@@ -1251,8 +1255,8 @@ plot.temp <- ggplot(data = phyto.df) +
 
 plot.temp.anomaly <- ggplot(data = phyto.df) +
   geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_rect(aes(xmin=parse_date_time("2014-03-09", orders = "Ymd"), xmax = parse_date_time("2016-03-21", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-09-19", orders = "Ymd"), xmax = parse_date_time("2015-12-13", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
   geom_line(aes(x = Date, y = SURF_TEMP_ANOM), color = my.colorblind.colors[4], lwd = 1) +
   labs(y = "Surface Water \n Temperature \n Anomaly (C)") +
   scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
@@ -1265,8 +1269,8 @@ plot.temp.anomaly <- ggplot(data = phyto.df) +
 
 plot.log10chlorophyll <- ggplot(data = phyto.df) +
   geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_rect(aes(xmin=parse_date_time("2014-03-09", orders = "Ymd"), xmax = parse_date_time("2016-03-21", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-09-19", orders = "Ymd"), xmax = parse_date_time("2015-12-13", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
   geom_line(aes(x = Date, y = log10(Avg_Chloro)), color = my.colorblind.colors[3], lwd = 1) +
   labs(y = "log10 \n Chlorophyll \n (ug/L)") +
   scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
@@ -1279,8 +1283,8 @@ plot.log10chlorophyll <- ggplot(data = phyto.df) +
 
 plot.log10.sum.counts <- ggplot(data = phyto.df) +
   geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_rect(aes(xmin=parse_date_time("2014-03-09", orders = "Ymd"), xmax = parse_date_time("2016-03-21", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-09-19", orders = "Ymd"), xmax = parse_date_time("2015-12-13", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
   geom_line(aes(x = Date, y = log10(sum.phyto.counts)), color = my.colorblind.colors[5], lwd = 1) +
   labs(y = "log10 Total \n Phytoplankton \n Count") +
   scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
@@ -1307,8 +1311,8 @@ plot.log10.sum.counts <- ggplot(data = phyto.df) +
 
 plot.O2bio.predalt <- ggplot(data = phyto.df) +
   geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_rect(aes(xmin=parse_date_time("2014-03-09", orders = "Ymd"), xmax = parse_date_time("2016-03-21", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-09-19", orders = "Ymd"), xmax = parse_date_time("2015-12-13", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
   geom_line(aes(x = Date, y = O2bio.predicted.altered), color = "black", lwd = 1) +
   labs(y = "Predicted \n [O2]bio (uM)") +
   scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
@@ -1321,8 +1325,8 @@ plot.O2bio.predalt <- ggplot(data = phyto.df) +
 
 plot.beuti <- ggplot(data = phyto.df) +
   geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_rect(aes(xmin=parse_date_time("2014-03-09", orders = "Ymd"), xmax = parse_date_time("2016-03-21", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-09-19", orders = "Ymd"), xmax = parse_date_time("2015-12-13", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
   geom_line(aes(x = Date, y = BEUTI.33N), color = "grey30", lwd = 1) +
   labs(y = "BEUTI Index \n 33N \n (mmol/m/sec)") +
   scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
@@ -1336,8 +1340,8 @@ plot.beuti <- ggplot(data = phyto.df) +
 
 plot.richness <- ggplot(data = phyto.df) +
   geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_rect(aes(xmin=parse_date_time("2014-03-09", orders = "Ymd"), xmax = parse_date_time("2016-03-21", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-09-19", orders = "Ymd"), xmax = parse_date_time("2015-12-13", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
   geom_line(aes(x = Date, y = richness), color = my.colorblind.colors[6], lwd = 1) +
   labs(y = "Phytoplankton \n Richness") +
   scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
@@ -1350,8 +1354,8 @@ plot.richness <- ggplot(data = phyto.df) +
 
 plot.shannondiv <- ggplot(data = phyto.df) +
   geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_rect(aes(xmin=parse_date_time("2014-03-09", orders = "Ymd"), xmax = parse_date_time("2016-03-21", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-09-19", orders = "Ymd"), xmax = parse_date_time("2015-12-13", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
   geom_line(aes(x = Date, y = shannon.div), color = my.colorblind.colors[1], lwd = 1) +
   labs(y = "Phytoplankton \n Diversity") +
   scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
@@ -1364,8 +1368,8 @@ plot.shannondiv <- ggplot(data = phyto.df) +
 
 plot.nitrate <- ggplot(data = phyto.df) +
   geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_rect(aes(xmin=parse_date_time("2014-03-09", orders = "Ymd"), xmax = parse_date_time("2016-03-21", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-09-19", orders = "Ymd"), xmax = parse_date_time("2015-12-13", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
   geom_line(aes(x = Date, y = Nitrate), color = "grey69", lwd = 1) +
   labs(y = "Nitrate (uM)") +
   scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
@@ -1378,8 +1382,8 @@ plot.nitrate <- ggplot(data = phyto.df) +
 
 plot.phosphate <- ggplot(data = phyto.df) +
   geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_rect(aes(xmin=parse_date_time("2014-03-09", orders = "Ymd"), xmax = parse_date_time("2016-03-21", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-09-19", orders = "Ymd"), xmax = parse_date_time("2015-12-13", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
   geom_line(aes(x = Date, y = Phosphate), color = "grey69", lwd = 1) +
   labs(y = "Phosphate (uM)") +
   scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
@@ -1392,8 +1396,8 @@ plot.phosphate <- ggplot(data = phyto.df) +
 
 plot.silicate <- ggplot(data = phyto.df) +
   geom_rect(aes(xmin=parse_date_time("2020-03-20", orders = "Ymd"), xmax = parse_date_time("2020-06-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'springgreen', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2013-10-01", orders = "Ymd"), xmax = parse_date_time("2016-04-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
-  geom_rect(aes(xmin=parse_date_time("2014-01-01", orders = "Ymd"), xmax = parse_date_time("2016-01-01", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
+  geom_rect(aes(xmin=parse_date_time("2014-03-09", orders = "Ymd"), xmax = parse_date_time("2016-03-21", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.01) +
+  geom_rect(aes(xmin=parse_date_time("2014-09-19", orders = "Ymd"), xmax = parse_date_time("2015-12-13", orders = "ymd"), ymin = -Inf, ymax = Inf), fill = 'pink', alpha = 0.5) +
   geom_line(aes(x = Date, y = Silicate), color = "grey69", lwd = 1) +
   labs(y = "Silicate (uM)") +
   scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
@@ -1423,7 +1427,7 @@ big.ole.plot <- plot.o2bio.predalt.box + plot.O2bio.predalt + plot.vol.O2bio.pre
   plot.beuti.box + plot.beuti + plot.vol.beuti + plot.vol.beuti.box +
   plot_layout(ncol = 4, axes = "collect", widths = c(1,3,3,1))
 
-ggsave("Figures/2026-04-19_big_ole_plot.pdf", width = 20, height = 20, units = "in")
+ggsave("Figures/2026-05-03_big_ole_plot.pdf", width = 20, height = 20, units = "in")
 
 
 
@@ -1997,7 +2001,7 @@ my.cor.results <- cor(my.cor.df.reordered, method = "pearson", use = "pairwise.c
 my.tl.colors <- c("black", my.colorblind.colors[6], my.colorblind.colors[1], my.colorblind.colors[5], my.colorblind.colors[3], my.colorblind.colors[4], my.colorblind.colors[2], "grey69", "grey69", "grey69", "grey30")
 
 par(font = 2)
-corrplot(my.cor.results, diag = F, method = "square", tl.cex = 0.5, mar = c(0,0,0,0), col = viridis(100), rect.col = "black", tl.col = my.tl.colors, cl.)
+corrplot(my.cor.results, diag = F, method = "square", tl.cex = 0.5, mar = c(0,0,0,0), col = viridis(100), rect.col = "black", tl.col = my.tl.colors)
 
 my.cor.results <- as.data.frame(my.cor.results)
 my.cor.results$X <- rownames(my.cor.results)
@@ -2043,7 +2047,55 @@ ggplot() +
   labs(y = "Jaccard Turnover Index", x = "Date") +
   scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
   theme_bw() +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) +
+  theme(axis.title = element_text(size = 14, face = "bold"), 
+        axis.text = element_text(size = 12), 
+        legend.text = element_text(size = 12), 
+        legend.title = element_text(size = 14, face = "bold"),
+        title = element_text(face = "bold")) +
+  labs(tag = "A") + theme(plot.tag = element_text(size = 18, face = "bold"))
+
+
+
+my.aov <- aov(c(NA,super_diag)~phyto.df$Blob.status)
+
+my.tukey <- TukeyHSD(my.aov)
+
+my.tukey.results <- my.tukey$`phyto.df$Blob.status`
+
+my.df <- as.data.frame(my.tukey.results[which(my.tukey.results[,4] < 0.05), 4])
+my.df$period.comparison <- rownames(my.df)
+
+library(multcompView)
+
+my.letters <- multcompLetters4(my.aov, my.tukey)[[1]]$Letters
+
+y_max <- tapply(c(NA,super_diag), phyto.df$Blob.status, max, na.rm = TRUE)
+
+label_df <- data.frame(
+  Blob.status = names(my.letters),
+  Letter = my.letters,
+  y_pos = y_max[names(my.letters)] + 0.1  # adjust spacing as needed
+)
+
+
+ggplot() +
+  geom_boxplot(aes(x = phyto.df$Blob.status, y = c(NA,super_diag), fill = phyto.df$Blob.status)) +
+  scale_fill_manual(values = my.colors.blob.2022) +
+  labs(x = "Time Period", y = "Jaccard Turnover") +
+  guides(fill = "none") +
+  geom_text(
+    data = label_df,
+    aes(x = Blob.status, y = y_pos, label = Letter),
+    inherit.aes = FALSE) +
+  theme_bw() +
+  theme(axis.title = element_text(size = 14, face = "bold"), 
+        axis.text = element_text(size = 12), 
+        legend.text = element_text(size = 12), 
+        legend.title = element_text(size = 14, face = "bold"),
+        title = element_text(face = "bold")) +
+  labs(tag = "B") + theme(plot.tag = element_text(size = 18, face = "bold"))
+
 
 
 # ---- taxa variability between time periods ----
@@ -2189,8 +2241,8 @@ countData<-(t(countData+1))
 
 metadata <- data.frame(Date = parse_date_time(rownames(combo.full.mat), orders = "Ymd"))
 metadata$Blob.status <- "Blob"
-metadata$Blob.status[which(year(metadata$Date) <= 2013)] <- "PreBlob"
-metadata$Blob.status[which(year(metadata$Date) >= 2016)] <- "PostBlob"
+metadata$Blob.status[which(metadata$Date < parse_date_time("2014-09-19", orders = "Ymd"))] <- "PreBlob"
+metadata$Blob.status[which(metadata$Date > parse_date_time("2015-12-13", orders = "Ymd"))] <- "PostBlob"
 metadata$Blob.status[which(year(metadata$Date) >= 2022)] <- "Post2022Shift"
 my.rownames <- metadata$Date
 metadata <- as.data.frame(metadata[,-1])
@@ -2285,11 +2337,11 @@ ggplot(data = res_tax_sig) +
   theme(strip.background = element_rect(fill = "white", color = NULL), strip.text = element_text(size = 12, face = "bold")) +
   theme(axis.title = element_text(size = 14, face = "bold"), axis.text = element_text(size = 12)) +
   theme(legend.title = element_text(size = 14, face = "bold"), legend.text = element_text(size = 12)) +
-  # ggtitle(label = "Blob Shift") + theme(plot.title = element_text(size = 14, face = "bold", hjust = 1)) +
+  # ggtitle(label = "PreBlob-Blob Shift") + theme(plot.title = element_text(size = 14, face = "bold", hjust = 1)) +
   # labs(tag = "A", x = "Taxon", y = "log2 Fold Change") + theme(plot.tag = element_text(size = 18, face = "bold"))
-  # ggtitle(label = "Post-Blob Shift") + theme(plot.title = element_text(size = 14, face = "bold", hjust = 1)) +
+  # ggtitle(label = "Blob-PostBlob Shift") + theme(plot.title = element_text(size = 14, face = "bold", hjust = 1)) +
   # labs(tag = "B", x = "Taxon", y = "log2 Fold Change") + theme(plot.tag = element_text(size = 18, face = "bold"))
-  ggtitle(label = "2022 Shift") + theme(plot.title = element_text(size = 14, face = "bold", hjust = 1)) +
+  ggtitle(label = "PostBlob-2022Shift") + theme(plot.title = element_text(size = 14, face = "bold", hjust = 1)) +
   labs(tag = "C", x = "Taxon", y = "log2 Fold Change") + theme(plot.tag = element_text(size = 18, face = "bold"))
 
 

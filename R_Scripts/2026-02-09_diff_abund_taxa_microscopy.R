@@ -83,8 +83,10 @@ label_df <- data.frame(
 
 
 plot.FCM.SG.box <- ggplot(sccoos.FCM) +
-  geom_boxplot(aes(x = Blob.status, y = total_ml_vol_corrected_SG), fill = my.colorblind.colors[6]) +
-  scale_fill_manual(values = my.colors.blob.2022) +
+  geom_boxplot(aes(x = Blob.status, y = total_ml_vol_corrected_SG)
+               # ,fill = my.colorblind.colors[6]
+               ) +
+  # scale_fill_manual(values = my.colorblind.colors) +
   labs(x = "Time Period", y = "FCM SG Total (cells/mL)") +
   guides(fill = "none") +
   # geom_text(
@@ -94,7 +96,7 @@ plot.FCM.SG.box <- ggplot(sccoos.FCM) +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
 
-
+t.test(sccoos.FCM$total_ml_vol_corrected_SG[which(sccoos.FCM$Blob.status == "PostBlob")], sccoos.FCM$total_ml_vol_corrected_SG[which(sccoos.FCM$Blob.status == "Post2022Shift")])
 
 
 
@@ -562,8 +564,8 @@ ggplot(data = model.var.imp[order(model.var.imp$Variable.Importance, decreasing 
 
 # # ---- toggle top predictors (optional) ----
 
-# my.top.pred.taxa <- as.character(model.var.imp$Predictors[which(model.var.imp$Variable.Importance >= 5)])
-# com.structure.for.nmds <- combo.full[,which(colnames(combo.full) %in% c(my.top.pred.taxa, "Date"))]
+my.top.pred.taxa <- as.character(model.var.imp$Predictors[which(model.var.imp$Variable.Importance >= 5)])
+com.structure.for.nmds <- combo.full[,which(colnames(combo.full) %in% c(my.top.pred.taxa, "Date"))]
 
 
 #### ----
@@ -739,7 +741,10 @@ ggplot() +
         axis.text = element_text(size = 12), 
         legend.text = element_text(size = 12), 
         legend.title = element_text(size = 14, face = "bold"),
-        title = element_text(face = "bold")) 
+        title = element_text(face = "bold")) +
+  # labs(tag = "A") + theme(plot.tag = element_text(size = 18, face = "bold"))
+  labs(tag = "B") + theme(plot.tag = element_text(size = 18, face = "bold"))
+  
 
 
 # 
@@ -1296,7 +1301,8 @@ ggplot(data = my.Dim1.df[order(my.Dim1.df$adj.R2),]) +
   theme(axis.title = element_text(size = 14, face = "bold"), axis.text = element_text(size = 12), legend.title = element_text(size = 14, face = "bold"), legend.text = element_text(size = 12)) +
   theme(strip.background = element_rect(fill = "white", color = NULL), strip.text = element_text(size = 12, face = "bold")) +
   theme(axis.title = element_text(size = 14, face = "bold"), axis.text = element_text(size = 12)) +
-  theme(legend.title = element_text(size = 14, face = "bold"), legend.text = element_text(size = 12))
+  theme(legend.title = element_text(size = 14, face = "bold"), legend.text = element_text(size = 12)) +
+  labs(tag = "B") + theme(plot.tag = element_text(size = 18, face = "bold"))
 
 
 

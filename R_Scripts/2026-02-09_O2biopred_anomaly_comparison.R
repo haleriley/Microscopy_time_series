@@ -334,6 +334,11 @@ sio.temp.baseline.bootstrap.summary <- readRDS("2026-04-26_sio_temp_baseline_boo
 # }
 
 
+#### ----
+
+sio.temp.baseline.bootstrap.summary <- readRDS("2026-04-26_sio_temp_baseline_bootstrap_summary.rds")
+
+
 ggplot(data = sio.temp.baseline.bootstrap.summary) +
   geom_line(aes(x = cal.date, y = boot.base.temp)) +
   theme_bw()
@@ -521,8 +526,8 @@ no.result <- data.frame(
   length     = heatwave.durations$lengths[no_runs]
 )
 
-yes.result <- yes.result[which(year(yes.result$start_date) >= 2011),]
-no.result <- no.result[which(year(no.result$end_date) >= 2011),]
+# yes.result <- yes.result[which(year(yes.result$start_date) >= 2011),]
+# no.result <- no.result[which(year(no.result$end_date) >= 2011),]
 
 
 ggplot(data = yes.result) +
@@ -544,11 +549,124 @@ colnames(no.result)[2] <- "combo.date"
 no.result$combo.date <- no.result$combo.date + 60*60*24
 
 try.it <- merge(x = yes.result, y = no.result, by = "combo.date")
+try.it$intensity.max.anom.C <- NA
+
+
+for(i in 1:nrow(try.it)){
+  
+  my.date1 <- try.it$combo.date[i]
+  my.date2 <- try.it$end_date[i]
+  
+  my.max.anom <- max(combo.sio.temp$SURF_TEMP_ANOM[which(combo.sio.temp$Date >= my.date1 & combo.sio.temp$Date <= my.date2)], na.rm = T)
+  
+  try.it$intensity.max.anom.C[i] <- my.max.anom
+  
+}
+
+
+
+
+try.it.kmeans <- try.it[, c("length.x", "intensity.max.anom.C")]
+try.it.kmeans <- scale(try.it.kmeans)
+
+# wss <- sapply(1:10, function(k) {
+#   kmeans(try.it.kmeans, centers = k, nstart = 10)$tot.withinss
+# })
+# 
+# plot(1:10, wss, type = "b", pch = 19,
+#      xlab = "k", ylab = "Within-cluster sum of squares")
+
+
+set.seed(1234)  # reproducibility
+
+k <- 3  # choose number of clusters
+kmeans_result <- kmeans(try.it.kmeans, centers = k, nstart = 25)
+
+try.it$cluster <- as.factor(kmeans_result$cluster)
+
+try.it$timeseries <- "SCCOOS"
+try.it$timeseries[which(year(try.it$combo.date) < 2011)] <- "Early"
+
+ggplot(data = try.it) +
+  geom_point(aes(x = length.x, y = intensity.max.anom.C, color = cluster, shape = timeseries, size = timeseries), alpha = 0.7) +
+  scale_color_manual(values = c("darkgreen", "red", "gold"), labels = c("Moderate", "Extreme", "Abrupt & Intense")) +
+  scale_shape_manual(values = c(4,19)) + 
+  scale_size_manual(values = c(1.5,3)) +
+  labs(x = "Duration (days)", y = "Intensity (C)", color = "Heatwave") +
+  theme_bw() +
+  theme(axis.title = element_text(size = 14, face = "bold"), 
+        axis.text = element_text(size = 12), 
+        legend.text = element_text(size = 12), 
+        legend.title = element_text(size = 14, face = "bold"),
+        title = element_text(face = "bold")) +
+  guides(shape = "none", size = "none") +
+  labs(tag = "A") + theme(plot.tag = element_text(size = 18, face = "bold"))
+
+
+max(try.it$intensity.max.anom.C[which(try.it$cluster == 1)])
+min(try.it$length.x[which(try.it$cluster == 2)])
+
+
+
+
+try.it <- try.it[which(year(try.it$combo.date) >= 2011),]
+
+
+
 
 ggplot(data = try.it) +
   geom_point(aes(x = length.x, y = length.y, color = factor(year(combo.date)))) +
   scale_color_manual(values = rainbow(11)) +
   theme_bw()
+
+ggplot(data = try.it) +
+  geom_point(aes(x = length.x, y = length.y, color = factor(year(combo.date)))) +
+  scale_color_manual(values = rainbow(11)) +
+  theme_bw()
+
+
+ggplot(data = try.it) +
+  geom_point(aes(x = length.x, y = intensity.max.anom.C, color = factor(year(combo.date)))) +
+  scale_color_manual(values = rainbow(11)) +
+  theme_bw()
+
+
+ggplot(data = try.it) +
+  geom_point(aes(x = length.x, y = intensity.max.anom.C, color = cluster)) +
+  scale_color_manual(values = rainbow(11)) +
+  theme_bw()
+
+
+ggplot(data = try.it) +
+  geom_rect(aes(xmin = combo.date, xmax = end_date, ymin = -1, ymax = 1, fill = cluster), alpha = 1) +
+  # geom_line(aes(x = combo.date, y = length)) +
+  scale_fill_manual(values = c("darkgreen", "red", "gold"), labels = c("Moderate", "Extreme", "Abrupt & Intense")) +
+  theme_bw() +
+  labs(fill = "Heatwave Classification", x = "Date") +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y", limits = c(parse_date_time("2011-01-01", orders = "Ymd"), parse_date_time("2024-12-31", orders = "Ymd"))) +
+  theme(axis.title.y = element_blank(), axis.text.y = element_blank(), panel.grid.major.y = element_blank(), axis.ticks.y = element_blank(), panel.grid.minor.y = element_blank(), panel.grid.minor.x = element_blank()) +
+  theme(axis.title = element_text(size = 14, face = "bold"), 
+        axis.text = element_text(size = 12), 
+        legend.text = element_text(size = 12), 
+        legend.title = element_text(size = 14, face = "bold"),
+        title = element_text(face = "bold")) +
+  guides(fill = "none") +
+  labs(tag = "B") + theme(plot.tag = element_text(size = 18, face = "bold"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 my.dates <- seq(parse_date_time("2011-01-01", orders = "Ymd"), max(combo.sio.temp$Date), by = (60*60*24))
@@ -568,9 +686,6 @@ ggplot(data = my.heatwave.df) +
   geom_line(aes(x = my.dates, y = mean.hw..1.)) +
   theme_bw() +
   scale_x_datetime(date_breaks = "1 year", date_labels = "%Y")
-
-
-
 
 
 

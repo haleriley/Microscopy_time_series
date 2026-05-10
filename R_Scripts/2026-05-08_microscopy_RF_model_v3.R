@@ -4,6 +4,12 @@
 
 # ---- library ----
 
+## For weekly updated version (highly recommended), install from GitHub:
+# install.packages("drat", repos="https://cran.rstudio.com")
+# drat:::addRepo("dmlc")
+# install.packages("xgboost", repos="http://dmlc.ml/drat/", type = "source")
+
+
 library(tidyverse)
 library(lubridate)
 library(janitor)
@@ -13,6 +19,8 @@ library(ranger)
 library(readxl)
 library(patchwork)
 library(scico)
+library(gbm)
+library(xgboost)
 
 
 # ---- read in data ----
@@ -256,7 +264,7 @@ combo <- merge(o2bio.smooth[which(colnames(o2bio.smooth) %in% c("Date", "O2bio.e
 predictors <- colnames(phytos.full)[-1]
 response <- "O2bio.estimated"
 
-saveRDS(predictors, file = "2026-03-27_phyto_rf_predictors.rds")
+saveRDS(predictors, file = "2026-05-08_phyto_xgboost_predictors.rds")
 
 # ---- split training and testing data ----
 
@@ -266,8 +274,8 @@ saveRDS(predictors, file = "2026-03-27_phyto_rf_predictors.rds")
 test.index <- sample(c(1:nrow(combo)), size = 30, replace = F)
 mean(difftime(combo$Date[test.index], combo$Date[test.index + 21], units = "days"), na.rm = T)
 
-date1 <- parse_date_time("2019-08-01", orders = "Ymd")
-date2 <- parse_date_time("2019-11-01", orders = "Ymd")
+date1 <- parse_date_time("2019-08-15", orders = "Ymd")
+date2 <- parse_date_time("2019-10-01", orders = "Ymd")
 
 test.index <- which(combo$Date >= date1 & combo$Date <= date2)
 train <- combo[-test.index,]
@@ -276,35 +284,43 @@ test <- combo[test.index,]
 nrow(test)/nrow(combo)
 
 ggplot(combo) +
-  geom_rect(aes(xmin = date1, xmax = date2, ymin = -Inf, ymax = Inf), color = "blue") +
+  geom_rect(aes(xmin = date1, xmax = date2, ymin = -Inf, ymax = Inf), fill = "blue", alpha = 0.5) +
   geom_line(aes(x = Date, y = O2bio.estimated)) +
   theme_bw()
 
 
+train <- train[,-1]
+test <- test[,-1]
+
 # ---- o2bio prediction model ----
 
+
 set.seed(1234)
-m1 <- ranger(as.formula(paste(response, '.', sep = '~')),
-             data = train[,c(response, predictors)])
+m1 <- xgboost(
+  x = train[,which(colnames(train) != response)],
+  y = train[,which(colnames(train) == response)],
+  nrounds = 100
+)
 
-## two different ways of calculating RMSE
-sqrt(mean((m1$predictions - train$O2bio.estimated)^2))
-m1.RMSE <- sqrt(m1$prediction.error)
 
-plot(m1$predictions ~ train[,response])
-
-## assess model performance by testing model on witheld data (test data)
-set.seed(1234)
-o2bio.predict <- predict(m1, test) 
-
-plot(o2bio.predict$predictions ~ test[,response],
-     ylab = 'Observed',
-     xlab = 'Predicted')
-
-m1.lm <- lm(o2bio.predict$predictions ~ test[,response])
-abline(0, 1, lty = 2)
-abline(m1.lm)
-summary(m1.lm)
+# ## two different ways of calculating RMSE
+# sqrt(mean((m1$predictions - train$O2bio.estimated)^2, na.rm = T))
+# m1.RMSE <- sqrt(m1$prediction.error)
+# 
+# plot(m1$predictions ~ train[,response])
+# 
+# ## assess model performance by testing model on witheld data (test data)
+# set.seed(1234)
+# o2bio.predict <- predict(m1, test) 
+# 
+# plot(o2bio.predict$predictions ~ test[,response],
+#      ylab = 'Observed',
+#      xlab = 'Predicted')
+# 
+# m1.lm <- lm(o2bio.predict$predictions ~ test[,response])
+# abline(0, 1, lty = 2)
+# abline(m1.lm)
+# summary(m1.lm)
 
 # ---- parameter optimization ----
 
@@ -312,56 +328,48 @@ summary(m1.lm)
 ## these are all of the little settings in the model that we will try and adjust to find the best fit for the data
 
 hyper.grid <- expand.grid(
-  n.edges = seq(100, 3000, 100), # aka n.trees
-  mtry       = seq(1, ncol(ifcb), by = 1), # 
-  node_size  = seq(3, 9, by = 2), 
-  sample_size = c(.55, .632, .70, .80), # internal
-  OOB_RMSE   = 0 # internal
+  learning_rate = c(0.001, 0.01, 0.1, 0.3),
+  max_depth = c(2:6),
+  nrounds = seq(1000, 4000, 1000),
+  subsample = seq(0.3, 0.7, 0.1),
+  RMSE = NA
 )
 
 set.seed(1234)
+
 for(i in 1:nrow(hyper.grid)){ ## AKA for every combination of parameter settings
-  
-  # predictors <- boruta.index[order(colSums(asv.train)[colnames(asv.train) %in% boruta.index], decreasing = T)] # cannot use more n.edges than boruta predictors
+
   
   try({ ## try clause necessary because some parameter combinations are incompatible
     
-    model <- ranger(
-      formula = as.formula(paste(response, '.', sep = '~')),
-      data = train[,c(response, predictors)], 
-      num.trees       = 500,
-      mtry            = hyper.grid$mtry[i],
-      min.node.size   = hyper.grid$node_size[i],
-      sample.fraction = hyper.grid$sample_size[i],
-      seed            = 123
+    temp.model <- xgboost(
+      x = train[,which(colnames(train) != response)],
+      y = train[,which(colnames(train) == response)],
+      nrounds = hyper.grid$nrounds[i],
+      learning_rate = hyper.grid$eta[i],
+      max_depth = hyper.grid$max_depth[i],
+      subsample = hyper.grid$subsample[i],
+      verbosity = 0
     )
     
-    ## add OOB error to grid
-    hyper.grid$OOB_RMSE[i] <- sqrt(model$prediction.error)
-    
-    ## From the internet: 
-    ## OOB (out-of-bag) score is a performance metric for a machine learning model, 
-    ## specifically for ensemble models such as random forests. 
-    ## It is calculated using the samples that are not used in the training of the model, 
-    ## which is called out-of-bag samples.
-    ## The OOB_score is computed as the number of correctly predicted rows from the out-of-bag sample. 
-    ## OOB Error is the number of wrongly classifying the OOB Sample.
-    
+    temp.predict <- predict(temp.model, test)
+    temp.delta <- temp.predict - test$O2bio.estimated
+    hyper.grid$RMSE[i] <- sqrt(mean(temp.delta^2)) 
   }, silent = F)
   
-  print(paste(i, 'out of', nrow(hyper.grid), hyper.grid$OOB_RMSE[i]))
-  
+  print(paste(i, 'out of', nrow(hyper.grid), hyper.grid$RMSE[i]))
 }
+
 
 hyper.grid$OOB_RMSE[hyper.grid$OOB_RMSE == 0] <- NA
 hyper.grid <- na.omit(hyper.grid)
 
-hist(hyper.grid$OOB_RMSE, breaks = 100)
+hist(hyper.grid$RMSE, breaks = 100)
 
 ## define selected optimal parameters for the model
-selected.params <- hyper.grid[which.min(hyper.grid$OOB_RMSE),]
+selected.params <- hyper.grid[which.min(hyper.grid$RMSE),]
 
-saveRDS(selected.params, "2026-04-26_phyto_rf_selected_params.rds")
+saveRDS(selected.params, "2026-05-08_phyto_xgboost_selected_params.rds")
 
 # ---- apply hypertuned parameters to model ----
 
@@ -369,36 +377,53 @@ saveRDS(selected.params, "2026-04-26_phyto_rf_selected_params.rds")
 
 ## create second model using optimal selected paramters
 set.seed(1234)
-m2 <- ranger(
-  formula = as.formula(paste(response, '.', sep = '~')),
-  data = train[,c(response, predictors)],
-  num.trees       = 500,
-  mtry            = selected.params$mtry,
-  min.node.size   = selected.params$node_size,
-  sample.fraction = selected.params$sample_size,
-  seed            = 123,
-  importance = 'permutation',
-  oob.error = T
+m2 <- xgboost(
+  x = train[,which(colnames(train) != response)],
+  y = train[,which(colnames(train) == response)],
+  nrounds = hyper.grid$nrounds[which.min(hyper.grid$RMSE)],
+  learning_rate = hyper.grid$eta[which.min(hyper.grid$RMSE)],
+  max_depth = hyper.grid$max_depth[which.min(hyper.grid$RMSE)],
+  subsample = hyper.grid$subsample[which.min(hyper.grid$RMSE)],
+  verbosity = 0
 )
 
+saveRDS(m2, file = "2026-05-08_phyto_xgboost_m2.rds")
+
+o2bio.predict <- predict(m2, test)
+m2.RMSE <- mean(sqrt((test$O2bio.estimated - o2bio.predict)^2))
+m2.rel.error <- median(abs(test$O2bio.estimated - o2bio.predict)/abs(test$O2bio.estimated))
+summary(lm(o2bio.predict~test$O2bio.estimated))
+
+
+temp.test <- combo[test.index,]
+
+ggplot() +
+  geom_line(aes(x = temp.test$Date, y = temp.test$O2bio.estimated), color = "violetred1", linewidth = 1) +
+  geom_line(aes(x = temp.test$Date, y = o2bio.predict), color = "violetred4", linewidth = 1) +
+  theme_bw() +
+  labs(x = "Date", y = "[O2]bio (uM)") 
+
+
+ggplot() +
+  geom_abline(slope = 1, intercept = 0, color = "violetred1", linewidth = 1) +
+  geom_point(aes(x = temp.test$O2bio.estimated, y = o2bio.predict), color = "violetred4") +
+  theme_bw() +
+  labs(x = "[O2]bio (uM)", y = "Predicted [O2]bio (uM)") 
 
 
 # ---- create final model ----
 
 set.seed(1234)
 ## create second model using optimal selected parameters
-m3 <- ranger(
-  formula = as.formula(paste(response, '.', sep = '~')),
-  data = combo[,c(response, predictors)],
-  num.trees       = 500,
-  mtry            = selected.params$mtry,
-  min.node.size   = selected.params$node_size,
-  sample.fraction = selected.params$sample_size,
-  seed            = 123,
-  importance = 'permutation',
-  oob.error = T
+m3 <- xgboost(
+  x = combo[,which(colnames(combo) != response)[-1]],
+  y = combo[,which(colnames(combo) == response)],
+  nrounds = hyper.grid$nrounds[which.min(hyper.grid$RMSE)],
+  learning_rate = hyper.grid$eta[which.min(hyper.grid$RMSE)],
+  max_depth = hyper.grid$max_depth[which.min(hyper.grid$RMSE)],
+  subsample = hyper.grid$subsample[which.min(hyper.grid$RMSE)],
+  verbosity = 0
 )
-
 
 set.seed(1234)
 ## compare m1 and m2 with and without parameter optimization
@@ -406,9 +431,9 @@ o2bio.predict <- predict(m1, test)
 o2bio.predict <- predict(m2, test)
 o2bio.predict <- predict(m3, test)
 
-m3.RMSE <- mean(sqrt((test$O2bio.estimated - o2bio.predict$predictions)^2))
-m3.rel.error <- median(abs(test$O2bio.estimated - o2bio.predict$predictions)/abs(test$O2bio.estimated))
-summary(lm(o2bio.predict$predictions~test$O2bio.estimated))
+m3.RMSE <- mean(sqrt((test$O2bio.estimated - o2bio.predict)^2))
+m3.rel.error <- median(abs(test$O2bio.estimated - o2bio.predict)/abs(test$O2bio.estimated))
+summary(lm(o2bio.predict~test$O2bio.estimated))
 
 o2bio.predict <- predict(m3, combo)
 
@@ -422,16 +447,16 @@ summary(lm(o2bio.predict$predictions ~ combo[,response]))
 set.seed(1234)
 o2bio.predict <- predict(m3, combo)
 
-saveRDS(o2bio.predict, "2026-04-27_o2bio_predict_m3.rds")
+saveRDS(o2bio.predict, "2026-05-08_o2bio_predict_m3.rds")
 
 
 # mean(sqrt((train$o2bio - o2bio.predict$predictions)^2))
 # median(abs(train$o2bio - o2bio.predict$predictions)/abs(train$o2bio))
 
-combo$O2bio.predicted <- o2bio.predict$predictions
+combo$O2bio.predicted <- o2bio.predict
 
-m3.RMSE.full <- mean(sqrt((combo$O2bio.estimated - combo$O2bio.predicted)^2))
-m3.rel.error.full <- median(abs(combo$O2bio.estimated - combo$O2bio.predicted)/abs(combo$O2bio.estimated))
+# m3.RMSE.full <- mean(sqrt((combo$O2bio.estimated - combo$O2bio.predicted)^2))
+# m3.rel.error.full <- median(abs(combo$O2bio.estimated - combo$O2bio.predicted)/abs(combo$O2bio.estimated))
 
 
 
@@ -536,8 +561,8 @@ combo.full <- merge(o2bio.smooth[which(colnames(o2bio.smooth) %in% c("Date", "O2
 
 full.phyto.o2bio.predict <- predict(m3, combo.full)
 
-combo.full$O2bio.predicted <- full.phyto.o2bio.predict$predictions
-combo.full$O2bio.predicted.altered <- (full.phyto.o2bio.predict$predictions-my.intercept)/my.slope
+combo.full$O2bio.predicted <- full.phyto.o2bio.predict
+combo.full$O2bio.predicted.altered <- (full.phyto.o2bio.predict-my.intercept)/my.slope
 
 combo.full$Dataset <- "W.E. Allen 2"
 combo.full$Dataset[which(combo.full$Date <= parse_date_time("1929", orders = "Y"))] <- "W.E. Allen 1"
@@ -549,13 +574,13 @@ combo.full$Dataset[which(combo.full$Date >= parse_date_time("2000", orders = "Y"
 # combo.full <- readRDS("2026-02-09_microscopy_o2bio_combo_full.rds")
 
 
-saveRDS(combo.full, file = "2026-04-23_microscopy_o2bio_combo_full.rds")
+saveRDS(combo.full, file = "2026-05-08_microscopy_o2bio_combo_full_from_xgboost.rds")
 
 
 
-setwd("C://Users/haler/Documents/PhD-Bowman/Microscopy_time_series/R_Data/")
-
-combo.full <- readRDS("2026-04-23_microscopy_o2bio_combo_full.rds")
+# setwd("C://Users/haler/Documents/PhD-Bowman/Microscopy_time_series/R_Data/")
+# 
+# combo.full <- readRDS("2026-04-23_microscopy_o2bio_combo_full.rds")
 
 
 my.min <- min(na.omit(c(combo.full$O2bio.estimated, combo.full$O2bio.predicted.altered)))
@@ -677,11 +702,11 @@ all.valid.date.times <- c(cross.val.df$Date[1])
 for(d in 1:nrow(cross.val.df)){
   
   date1 <- cross.val.df$Date[d] 
-  date2 <- cross.val.df$Date[d] + 90*60*60*24  # 95/5 split, ~3 months
+  date2 <- cross.val.df$Date[d] + 42*60*60*24  # 95/5 split, ~6 weeks
   
   my.df <- cross.val.df$Date[which(cross.val.df$Date >= date1 & cross.val.df$Date <= date2)]
   
-  if(length(my.df) >= 0.8*13){ # number of expected samples in 3 months *0.8 in case a little missing data
+  if(length(my.df) >= 0.8*6){ # number of expected samples in 6 weeks *0.8 in case a little missing data
     
     all.valid.date.times <- c(all.valid.date.times, cross.val.df$Date[d]) 
     
@@ -699,19 +724,19 @@ colnames(my.cross.val.values) <- c("Date", "n.days", "perc.data", "RMSE_model_hy
 
 my.cross.val.values$Date <- all.valid.days
 
-selected.params <- readRDS("2026-04-26_phyto_rf_selected_params.rds")
+selected.params <- readRDS("2026-05-08_phyto_xgboost_selected_params.rds")
 
 
 d=1
 for(d in 1:length(all.valid.days)){
   
   date1 <- all.valid.days[d] 
-  date2 <- all.valid.days[d] + 90*60*60*24  # 90/10 split, ~3 months
+  date2 <- all.valid.days[d] + 42*60*60*24  # 90/10 split, ~6 weeks
   
   index <- which(cross.val.df$Date >= date1 & cross.val.df$Date <= date2)
   
   cross.val.df.nd <- cross.val.df
-  # cross.val.df.nd <- cross.val.df[,which(colnames(cross.val.df) != "Date")]
+  cross.val.df.nd <- cross.val.df[,which(colnames(cross.val.df) != "Date")]
   
   
   cross.val.test <- cross.val.df.nd[index,]
@@ -727,21 +752,19 @@ for(d in 1:length(all.valid.days)){
   # my.cross.val.values$p_no_model[d] <- summary(lm(formula = cross.val.test$O2bio.predicted~cross.val.test$O2bio.estimated))$coefficients[2,4]
   # my.cross.val.values$med_perc_error_no_model[d] <- median((cross.val.test$O2bio.predicted - cross.val.test$O2bio.estimated)/cross.val.test$O2bio.estimated)
   
-  temp.rf <- ranger(
-    formula = as.formula(paste(response, '.', sep = '~')),
-    data = cross.val.train[,c(response, predictors)],
-    num.trees       = 500,
-    mtry            = selected.params$mtry,
-    min.node.size   = selected.params$node_size,
-    sample.fraction = selected.params$sample_size,
-    seed            = 123,
-    importance = 'permutation',
-    oob.error = T
+  temp.xgboost <- xgboost(
+    x = cross.val.train[,which(colnames(cross.val.train) != response)],
+    y = cross.val.train[,which(colnames(cross.val.train) == response)],
+    nrounds = hyper.grid$nrounds[which.min(hyper.grid$RMSE)],
+    learning_rate = hyper.grid$eta[which.min(hyper.grid$RMSE)],
+    max_depth = hyper.grid$max_depth[which.min(hyper.grid$RMSE)],
+    subsample = hyper.grid$subsample[which.min(hyper.grid$RMSE)],
+    verbosity = 0
   )
   
   
-  temp.prediction <- predict(temp.rf, cross.val.test)
-  temp.prediction <- temp.prediction$predictions
+  temp.prediction <- predict(temp.xgboost, cross.val.test)
+  temp.prediction <- temp.prediction
   
   
   summary(temp.prediction)
@@ -758,8 +781,8 @@ for(d in 1:length(all.valid.days)){
   my.cross.val.values$med.O2bio[d] <- median(cross.val.test$O2bio.estimated)
   my.cross.val.values$med.O2biopred[d] <- median(temp.prediction)
   
-  full.prediction <- predict(temp.rf, cross.val.df)
-  full.prediction <- full.prediction$predictions
+  full.prediction <- predict(temp.xgboost, cross.val.df)
+  full.prediction <- full.prediction
   
   summary(full.prediction)
   summary(cross.val.df$O2bio.estimated)
@@ -772,15 +795,15 @@ for(d in 1:length(all.valid.days)){
   my.cross.val.values$mean.O2biopred.full[d] <- mean(full.prediction)
   
   
-  my.cross.val.values$mean.date[d] <- all.valid.days[d] + (90*60*60*24)/2
+  my.cross.val.values$mean.date[d] <- all.valid.days[d] + (42*60*60*24)/2
   
   print(paste("Cross-Validation", d, "of", length(all.valid.days), "complete"))
   
 }
 
 
-saveRDS(my.cross.val.values, file = "2026-05-06_phyto_rf_cross_validation_results.rds")
-my.cross.val.values <- readRDS("2026-05-06_phyto_rf_cross_validation_results.rds")
+saveRDS(my.cross.val.values, file = "2026-05-08_phyto_xgboost_cross_validation_results.rds")
+my.cross.val.values <- readRDS("2026-05-08_phyto_xgboost_cross_validation_results.rds")
 
 range(my.cross.val.values$perc.data)
 
@@ -797,7 +820,7 @@ range(my.cross.val.values$perc.data)
 # hist(my.cross.val.values$R2_model_hyper_full)
 
 colnames(my.cross.val.values)[c(7,11)] <- c("2-week Validation", "Full Time Series")
-cross.val.long <- my.cross.val.values[,c(1,7)] %>% pivot_longer(cols = colnames(my.cross.val.values)[c(7)], names_to = "model", values_to = "my.perc.error")
+cross.val.long <- my.cross.val.values[,c(1,4,7)] %>% pivot_longer(cols = colnames(my.cross.val.values)[c(7)], names_to = "model", values_to = "my.perc.error")
 cross.val.long$Year <- year(cross.val.long$Date)
 cross.val.long$Date <- parse_date_time(paste(month(cross.val.long$Date), day(cross.val.long$Date), sep = "-"), orders = "md")
 
@@ -829,6 +852,34 @@ cross.val.long$Date <- parse_date_time(paste(month(cross.val.long$Date), day(cro
 #   theme(axis.title = element_text(size = 14, face = "bold"), axis.text = element_text(size = 12), legend.title = element_text(size = 14, face = "bold"), legend.text = element_text(size = 12)) +
 #   theme(strip.background = element_rect(fill = "white", color = NULL), strip.text = element_text(size = 12, face = "bold"))
 
+o2bio.predict <- predict(m2, test)
+
+
+ggplot(data = my.cross.val.values) +
+  geom_line(aes(x = Date, y = RMSE_model_hyper)) +
+  theme_bw() +
+  # scale_fill_manual(values = scico(12, palette = "romaO", direction = -1))+
+  labs(x = "Date", y = "RMSE (uM)") +
+  scale_x_datetime(date_breaks = "1 year", date_labels = "%Y") +
+  theme(axis.title = element_text(size = 14, face = "bold"), axis.text = element_text(size = 12), legend.title = element_text(size = 14, face = "bold"), legend.text = element_text(size = 12)) +
+  theme(strip.background = element_rect(fill = "white", color = NULL), strip.text = element_text(size = 12, face = "bold")) +
+  theme(axis.title = element_text(size = 14, face = "bold"), axis.text = element_text(size = 12)) +
+  theme(legend.title = element_text(size = 14, face = "bold"), legend.text = element_text(size = 12)) 
+  # labs(tag = "B", fill = "Mean month of \ncross-validatoin \ndata subset") + theme(plot.tag = element_text(size = 18, face = "bold")) +
+  # annotate("point", x = 100*m2.rel.error, y = 3.5, color = "black", shape = 13, size = 3, stroke = 1) 
+
+# ggplot(data = my.cross.val.values) +
+#   geom_histogram(aes(100*perc.data), color = "black", binwidth = 0.5) +
+#   theme_bw() +
+#   # scale_fill_manual(values = scico(12, palette = "romaO", direction = -1))+
+#   labs(x = "Percent Data Withheld (%)", y = "Frequency") +
+#   theme(axis.title = element_text(size = 14, face = "bold"), axis.text = element_text(size = 12), legend.title = element_text(size = 14, face = "bold"), legend.text = element_text(size = 12)) +
+#   theme(strip.background = element_rect(fill = "white", color = NULL), strip.text = element_text(size = 12, face = "bold")) +
+#   theme(axis.title = element_text(size = 14, face = "bold"), axis.text = element_text(size = 12)) +
+#   theme(legend.title = element_text(size = 14, face = "bold"), legend.text = element_text(size = 12)) 
+#   # labs(tag = "B", fill = "Mean month of \ncross-validatoin \ndata subset") + theme(plot.tag = element_text(size = 18, face = "bold")) +
+#   # annotate("point", x = 100*m2.rel.error, y = 3.5, color = "black", shape = 13, size = 3, stroke = 1) 
+  
 
 ggplot(data = cross.val.long) +
   geom_histogram(aes(abs(my.perc.error*100), fill = factor(month(Date), levels = c(1:12))), color = "black", binwidth = 2) +
@@ -839,8 +890,21 @@ ggplot(data = cross.val.long) +
   theme(strip.background = element_rect(fill = "white", color = NULL), strip.text = element_text(size = 12, face = "bold")) +
   theme(axis.title = element_text(size = 14, face = "bold"), axis.text = element_text(size = 12)) +
   theme(legend.title = element_text(size = 14, face = "bold"), legend.text = element_text(size = 12)) +
-  labs(tag = "B", fill = "Mean month of \ncross-validatoin \ndata subset") + theme(plot.tag = element_text(size = 18, face = "bold")) +
-  annotate("point", x = 100*m3.rel.error, y = 3.5, color = "black", shape = 13, size = 3, stroke = 1) 
+  labs(tag = "B", fill = "Mean month of \ncross-validatoin \ndata subset") + theme(plot.tag = element_text(size = 18, face = "bold")) 
+  # annotate("point", x = 100*m2.rel.error, y = 3.5, color = "black", shape = 13, size = 3, stroke = 1) 
+
+ggplot(data = cross.val.long) +
+  geom_histogram(aes(RMSE_model_hyper, fill = factor(month(Date), levels = c(1:12))), color = "black", binwidth = 1) +
+  theme_bw() +
+  scale_fill_manual(values = scico(12, palette = "romaO", direction = -1))+
+  labs(x = "RMSE (uM)", y = "Frequency") +
+  theme(axis.title = element_text(size = 14, face = "bold"), axis.text = element_text(size = 12), legend.title = element_text(size = 14, face = "bold"), legend.text = element_text(size = 12)) +
+  theme(strip.background = element_rect(fill = "white", color = NULL), strip.text = element_text(size = 12, face = "bold")) +
+  theme(axis.title = element_text(size = 14, face = "bold"), axis.text = element_text(size = 12)) +
+  theme(legend.title = element_text(size = 14, face = "bold"), legend.text = element_text(size = 12)) +
+  labs(tag = "B", fill = "Mean month of \ncross-validatoin \ndata subset") + theme(plot.tag = element_text(size = 18, face = "bold")) 
+  # annotate("point", x = m2.RMSE, y = 3.5, color = "black", shape = 13, size = 3, stroke = 1) 
+
 
 
 # FIGURE 4A
@@ -853,31 +917,31 @@ plot.4a <- ggplot(data = my.cross.val.values) +
   theme(axis.title = element_text(size = 14, face = "bold"), axis.text = element_text(size = 12)) +
   theme(legend.title = element_text(size = 14, face = "bold"), legend.text = element_text(size = 12)) +
   labs(tag = "A") + theme(plot.tag = element_text(size = 18, face = "bold")) +
-  ylim(c(min(my.cross.val.values$mean.O2bio)*1.1, max(my.cross.val.values$mean.O2bio)*1.1)) + xlim(c(min(my.cross.val.values$mean.O2bio)*1.1, max(my.cross.val.values$mean.O2bio)*1.1)) +
+  # ylim(c(min(my.cross.val.values$mean.O2bio)*1.1, max(my.cross.val.values$mean.O2bio)*1.1)) + xlim(c(min(my.cross.val.values$mean.O2bio)*1.1, max(my.cross.val.values$mean.O2bio)*1.1)) +
   theme(panel.grid = element_blank()) +
   labs(color = "Mean month of \ncross-validatoin \ndata subset", x = "Mean [O2]bio (μM)", y = "Mean predicted [O2]bio (μM)") +
   scale_color_gradientn(colors = scico(12, palette = "romaO", direction = -1), labels = seq(0,12,3), breaks = seq(0,12,3), guide = guide_colorbar(reverse = T)) +
-  annotate("point", x = mean(test$O2bio.estimated), y = mean(o2bio.predict$predictions), color = "black", shape = 13, size = 3, stroke = 1) +
+  # annotate("point", x = mean(test$O2bio.estimated), y = mean(o2bio.predict), color = "black", shape = 13, size = 3, stroke = 1) +
   theme(legend.position = "none")
   
 plot.4a
 
 
-ggplot(data = my.cross.val.values) +
-  geom_point(aes(x = mean.O2bio, y = mean.O2biopred.full, color = month(Date)), size = 3) +
-  geom_abline(slope = 1, intercept = 0, alpha = 0.5, lwd = 1) +
-  theme_bw() +
-  theme(axis.title = element_text(size = 14, face = "bold"), axis.text = element_text(size = 12), legend.title = element_text(size = 14, face = "bold"), legend.text = element_text(size = 12)) +
-  theme(strip.background = element_rect(fill = "white", color = NULL), strip.text = element_text(size = 12, face = "bold")) +
-  theme(axis.title = element_text(size = 14, face = "bold"), axis.text = element_text(size = 12)) +
-  theme(legend.title = element_text(size = 14, face = "bold"), legend.text = element_text(size = 12)) +
-  labs(tag = "A") + theme(plot.tag = element_text(size = 18, face = "bold")) +
-  ylim(c(min(my.cross.val.values$mean.O2bio)*1.1, max(my.cross.val.values$mean.O2bio)*1.1)) + xlim(c(min(my.cross.val.values$mean.O2bio)*1.1, max(my.cross.val.values$mean.O2bio)*1.1)) +
-  theme(panel.grid = element_blank()) +
-  labs(color = "Mean month of \ncross-validatoin \ndata subset", x = "Mean [O2]bio (μM)", y = "Mean predicted [O2]bio (μM)") +
-  scale_color_gradientn(colors = scico(12, palette = "romaO", direction = -1), labels = seq(0,12,3), breaks = seq(0,12,3), guide = guide_colorbar(reverse = T)) +
-  # annotate("point", x = mean(test$O2bio.estimated), y = mean(o2bio.predict$predictions), color = "black", shape = 13, size = 3, stroke = 1) +
-  theme(legend.position = "none")
+# ggplot(data = my.cross.val.values) +
+#   geom_point(aes(x = mean.O2bio, y = mean.O2biopred.full, color = month(Date)), size = 3) +
+#   geom_abline(slope = 1, intercept = 0, alpha = 0.5, lwd = 1) +
+#   theme_bw() +
+#   theme(axis.title = element_text(size = 14, face = "bold"), axis.text = element_text(size = 12), legend.title = element_text(size = 14, face = "bold"), legend.text = element_text(size = 12)) +
+#   theme(strip.background = element_rect(fill = "white", color = NULL), strip.text = element_text(size = 12, face = "bold")) +
+#   theme(axis.title = element_text(size = 14, face = "bold"), axis.text = element_text(size = 12)) +
+#   theme(legend.title = element_text(size = 14, face = "bold"), legend.text = element_text(size = 12)) +
+#   labs(tag = "A") + theme(plot.tag = element_text(size = 18, face = "bold")) +
+#   ylim(c(min(my.cross.val.values$mean.O2bio)*1.1, max(my.cross.val.values$mean.O2bio)*1.1)) + xlim(c(min(my.cross.val.values$mean.O2bio)*1.1, max(my.cross.val.values$mean.O2bio)*1.1)) +
+#   theme(panel.grid = element_blank()) +
+#   labs(color = "Mean month of \ncross-validatoin \ndata subset", x = "Mean [O2]bio (μM)", y = "Mean predicted [O2]bio (μM)") +
+#   scale_color_gradientn(colors = scico(12, palette = "romaO", direction = -1), labels = seq(0,12,3), breaks = seq(0,12,3), guide = guide_colorbar(reverse = T)) +
+#   # annotate("point", x = mean(test$O2bio.estimated), y = mean(o2bio.predict$predictions), color = "black", shape = 13, size = 3, stroke = 1) +
+#   theme(legend.position = "none")
 
 
 

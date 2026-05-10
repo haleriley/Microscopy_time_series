@@ -13,6 +13,7 @@ library(ranger)
 library(readxl)
 library(patchwork)
 library(scico)
+library(gbm)
 
 
 # ---- read in data ----
@@ -256,7 +257,7 @@ combo <- merge(o2bio.smooth[which(colnames(o2bio.smooth) %in% c("Date", "O2bio.e
 predictors <- colnames(phytos.full)[-1]
 response <- "O2bio.estimated"
 
-saveRDS(predictors, file = "2026-03-27_phyto_rf_predictors.rds")
+saveRDS(predictors, file = "2026-05-08_phyto_gbm_predictors.rds")
 
 # ---- split training and testing data ----
 
@@ -267,7 +268,7 @@ test.index <- sample(c(1:nrow(combo)), size = 30, replace = F)
 mean(difftime(combo$Date[test.index], combo$Date[test.index + 21], units = "days"), na.rm = T)
 
 date1 <- parse_date_time("2019-08-01", orders = "Ymd")
-date2 <- parse_date_time("2019-11-01", orders = "Ymd")
+date2 <- parse_date_time("2019-10-01", orders = "Ymd")
 
 test.index <- which(combo$Date >= date1 & combo$Date <= date2)
 train <- combo[-test.index,]
@@ -276,16 +277,28 @@ test <- combo[test.index,]
 nrow(test)/nrow(combo)
 
 ggplot(combo) +
-  geom_rect(aes(xmin = date1, xmax = date2, ymin = -Inf, ymax = Inf), color = "blue") +
+  geom_rect(aes(xmin = date1, xmax = date2, ymin = -Inf, ymax = Inf), fill = "blue", alpha = 0.5) +
   geom_line(aes(x = Date, y = O2bio.estimated)) +
   theme_bw()
 
 
+train <- train[,-1]
+test <- test[,-1]
+
 # ---- o2bio prediction model ----
 
+
 set.seed(1234)
-m1 <- ranger(as.formula(paste(response, '.', sep = '~')),
-             data = train[,c(response, predictors)])
+m1 <- gbm(O2bio.estimated ~ .,
+          data = train,
+          distribution = 'gaussian',
+          interaction.depth = 2,
+          n.trees = 4000,
+          bag.fraction = 0.5,
+          #train.fraction = 0.7,
+          shrinkage = 0.01,
+          verbose = T,
+          cv.folds = 2)
 
 ## two different ways of calculating RMSE
 sqrt(mean((m1$predictions - train$O2bio.estimated)^2))
@@ -312,56 +325,49 @@ summary(m1.lm)
 ## these are all of the little settings in the model that we will try and adjust to find the best fit for the data
 
 hyper.grid <- expand.grid(
-  n.edges = seq(100, 3000, 100), # aka n.trees
-  mtry       = seq(1, ncol(ifcb), by = 1), # 
-  node_size  = seq(3, 9, by = 2), 
-  sample_size = c(.55, .632, .70, .80), # internal
-  OOB_RMSE   = 0 # internal
+  interaction.depth = 2:6,
+  n.trees = seq(1000, 4000, 1000),
+  bag.fraction = seq(0.3, 0.7, 0.1),
+  shrinkage = c(0.001, 0.01, 0.1),
+  RMSE = NA
 )
 
 set.seed(1234)
+
 for(i in 1:nrow(hyper.grid)){ ## AKA for every combination of parameter settings
-  
-  # predictors <- boruta.index[order(colSums(asv.train)[colnames(asv.train) %in% boruta.index], decreasing = T)] # cannot use more n.edges than boruta predictors
+
   
   try({ ## try clause necessary because some parameter combinations are incompatible
     
-    model <- ranger(
-      formula = as.formula(paste(response, '.', sep = '~')),
-      data = train[,c(response, predictors)], 
-      num.trees       = 500,
-      mtry            = hyper.grid$mtry[i],
-      min.node.size   = hyper.grid$node_size[i],
-      sample.fraction = hyper.grid$sample_size[i],
-      seed            = 123
+    temp.model <- gbm(
+      formula = O2bio.estimated ~ .,
+      data = train,
+      interaction.depth = hyper.grid$interaction.depth[i],
+      distribution = 'gaussian',
+      n.trees       = hyper.grid$n.trees[i],
+      bag.fraction  = hyper.grid$bag.fraction[i],
+      shrinkage   = hyper.grid$shrinkage[i],
+      cv.folds = 2
     )
     
-    ## add OOB error to grid
-    hyper.grid$OOB_RMSE[i] <- sqrt(model$prediction.error)
-    
-    ## From the internet: 
-    ## OOB (out-of-bag) score is a performance metric for a machine learning model, 
-    ## specifically for ensemble models such as random forests. 
-    ## It is calculated using the samples that are not used in the training of the model, 
-    ## which is called out-of-bag samples.
-    ## The OOB_score is computed as the number of correctly predicted rows from the out-of-bag sample. 
-    ## OOB Error is the number of wrongly classifying the OOB Sample.
-    
+    temp.predict <- predict(temp.model, test)
+    temp.delta <- temp.predict - test$O2bio.estimated
+    hyper.grid$RMSE[i] <- sqrt(mean(temp.delta^2)) 
   }, silent = F)
   
-  print(paste(i, 'out of', nrow(hyper.grid), hyper.grid$OOB_RMSE[i]))
-  
+  print(paste(i, 'out of', nrow(hyper.grid), hyper.grid$RMSE[i]))
 }
+
 
 hyper.grid$OOB_RMSE[hyper.grid$OOB_RMSE == 0] <- NA
 hyper.grid <- na.omit(hyper.grid)
 
-hist(hyper.grid$OOB_RMSE, breaks = 100)
+hist(hyper.grid$RMSE, breaks = 100)
 
 ## define selected optimal parameters for the model
-selected.params <- hyper.grid[which.min(hyper.grid$OOB_RMSE),]
+selected.params <- hyper.grid[which.min(hyper.grid$RMSE),]
 
-saveRDS(selected.params, "2026-04-26_phyto_rf_selected_params.rds")
+saveRDS(selected.params, "2026-05-07_phyto_gbm_selected_params.rds")
 
 # ---- apply hypertuned parameters to model ----
 
@@ -369,36 +375,32 @@ saveRDS(selected.params, "2026-04-26_phyto_rf_selected_params.rds")
 
 ## create second model using optimal selected paramters
 set.seed(1234)
-m2 <- ranger(
-  formula = as.formula(paste(response, '.', sep = '~')),
-  data = train[,c(response, predictors)],
-  num.trees       = 500,
-  mtry            = selected.params$mtry,
-  min.node.size   = selected.params$node_size,
-  sample.fraction = selected.params$sample_size,
-  seed            = 123,
-  importance = 'permutation',
-  oob.error = T
+m2 <- gbm(
+  formula = O2bio.estimated ~ .,
+  data = train,
+  interaction.depth = hyper.grid$interaction.depth[which.min(hyper.grid$RMSE)],
+  distribution = 'gaussian',
+  n.trees       = hyper.grid$n.trees[which.min(hyper.grid$RMSE)],
+  bag.fraction  = hyper.grid$bag.fraction[which.min(hyper.grid$RMSE)],
+  shrinkage   = hyper.grid$shrinkage[which.min(hyper.grid$RMSE)],
+  cv.folds = 2
 )
 
+saveRDS(m2, file = "2026-05-08_phyto_gbm_m2.rds")
 
 
 # ---- create final model ----
 
 set.seed(1234)
 ## create second model using optimal selected parameters
-m3 <- ranger(
-  formula = as.formula(paste(response, '.', sep = '~')),
-  data = combo[,c(response, predictors)],
-  num.trees       = 500,
-  mtry            = selected.params$mtry,
-  min.node.size   = selected.params$node_size,
-  sample.fraction = selected.params$sample_size,
-  seed            = 123,
-  importance = 'permutation',
-  oob.error = T
-)
-
+m3 <- gbm(O2bio.estimated ~ .,
+          data = combo[,-1],
+          interaction.depth = hyper.grid$interaction.depth[which.min(hyper.grid$RMSE)],
+          distribution = 'gaussian',
+          n.trees       = hyper.grid$n.trees[which.min(hyper.grid$RMSE)],
+          bag.fraction  = hyper.grid$bag.fraction[which.min(hyper.grid$RMSE)],
+          shrinkage   = hyper.grid$shrinkage[which.min(hyper.grid$RMSE)],
+          cv.folds = 2)
 
 set.seed(1234)
 ## compare m1 and m2 with and without parameter optimization
@@ -406,9 +408,9 @@ o2bio.predict <- predict(m1, test)
 o2bio.predict <- predict(m2, test)
 o2bio.predict <- predict(m3, test)
 
-m3.RMSE <- mean(sqrt((test$O2bio.estimated - o2bio.predict$predictions)^2))
-m3.rel.error <- median(abs(test$O2bio.estimated - o2bio.predict$predictions)/abs(test$O2bio.estimated))
-summary(lm(o2bio.predict$predictions~test$O2bio.estimated))
+m3.RMSE <- mean(sqrt((test$O2bio.estimated - o2bio.predict)^2))
+m3.rel.error <- median(abs(test$O2bio.estimated - o2bio.predict)/abs(test$O2bio.estimated))
+summary(lm(o2bio.predict~test$O2bio.estimated))
 
 o2bio.predict <- predict(m3, combo)
 
@@ -422,16 +424,16 @@ summary(lm(o2bio.predict$predictions ~ combo[,response]))
 set.seed(1234)
 o2bio.predict <- predict(m3, combo)
 
-saveRDS(o2bio.predict, "2026-04-27_o2bio_predict_m3.rds")
+saveRDS(o2bio.predict, "2026-05-08_o2bio_predict_m3.rds")
 
 
 # mean(sqrt((train$o2bio - o2bio.predict$predictions)^2))
 # median(abs(train$o2bio - o2bio.predict$predictions)/abs(train$o2bio))
 
-combo$O2bio.predicted <- o2bio.predict$predictions
+combo$O2bio.predicted <- o2bio.predict
 
-m3.RMSE.full <- mean(sqrt((combo$O2bio.estimated - combo$O2bio.predicted)^2))
-m3.rel.error.full <- median(abs(combo$O2bio.estimated - combo$O2bio.predicted)/abs(combo$O2bio.estimated))
+# m3.RMSE.full <- mean(sqrt((combo$O2bio.estimated - combo$O2bio.predicted)^2))
+# m3.rel.error.full <- median(abs(combo$O2bio.estimated - combo$O2bio.predicted)/abs(combo$O2bio.estimated))
 
 
 
@@ -536,8 +538,8 @@ combo.full <- merge(o2bio.smooth[which(colnames(o2bio.smooth) %in% c("Date", "O2
 
 full.phyto.o2bio.predict <- predict(m3, combo.full)
 
-combo.full$O2bio.predicted <- full.phyto.o2bio.predict$predictions
-combo.full$O2bio.predicted.altered <- (full.phyto.o2bio.predict$predictions-my.intercept)/my.slope
+combo.full$O2bio.predicted <- full.phyto.o2bio.predict
+combo.full$O2bio.predicted.altered <- (full.phyto.o2bio.predict-my.intercept)/my.slope
 
 combo.full$Dataset <- "W.E. Allen 2"
 combo.full$Dataset[which(combo.full$Date <= parse_date_time("1929", orders = "Y"))] <- "W.E. Allen 1"
@@ -549,13 +551,13 @@ combo.full$Dataset[which(combo.full$Date >= parse_date_time("2000", orders = "Y"
 # combo.full <- readRDS("2026-02-09_microscopy_o2bio_combo_full.rds")
 
 
-saveRDS(combo.full, file = "2026-04-23_microscopy_o2bio_combo_full.rds")
+saveRDS(combo.full, file = "2026-05-08_microscopy_o2bio_combo_full_from_gbm.rds")
 
 
 
-setwd("C://Users/haler/Documents/PhD-Bowman/Microscopy_time_series/R_Data/")
-
-combo.full <- readRDS("2026-04-23_microscopy_o2bio_combo_full.rds")
+# setwd("C://Users/haler/Documents/PhD-Bowman/Microscopy_time_series/R_Data/")
+# 
+# combo.full <- readRDS("2026-04-23_microscopy_o2bio_combo_full.rds")
 
 
 my.min <- min(na.omit(c(combo.full$O2bio.estimated, combo.full$O2bio.predicted.altered)))
